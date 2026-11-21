@@ -16,6 +16,12 @@ from mathwave.render import Renderer, braille_codes, grid_layout, plot_curve
 RATE = 44100
 
 
+def cli_env(tmp_path):
+    """Environment for running the CLI in tests: never read the user's real config."""
+    return dict(os.environ, PYTHONPATH=os.path.join(os.path.dirname(__file__), "..", "src"),
+                XDG_CONFIG_HOME=str(tmp_path / "xdg"), HOME=str(tmp_path / "home"))
+
+
 def tone(freq, seconds=0.2, amp=0.5):
     t = np.arange(int(RATE * seconds)) / RATE
     return amp * np.sin(2 * np.pi * freq * t)
@@ -144,8 +150,8 @@ def test_wav_render(tmp_path):
         assert w.getnframes() == RATE and w.getframerate() == RATE
 
 
-def test_cli_dump_and_formulas():
-    env = dict(os.environ, PYTHONPATH=os.path.join(os.path.dirname(__file__), "..", "src"))
+def test_cli_dump_and_formulas(tmp_path):
+    env = cli_env(tmp_path)
     out = subprocess.run([sys.executable, "-m", "mathwave", "--dump", "30", "--size", "120x40", "--no-color"],
                          capture_output=True, text=True, env=env, check=True).stdout
     assert "y = clip(A·tan(ωx + φ), −1, 1)" in out
@@ -345,8 +351,8 @@ def test_shipped_config_tune_examples_parse():
     assert set(cfg.tune) >= set(DEFAULT_ORDER)
 
 
-def test_cli_list_knobs():
-    env = dict(os.environ, PYTHONPATH=os.path.join(os.path.dirname(__file__), "..", "src"))
+def test_cli_list_knobs(tmp_path):
+    env = cli_env(tmp_path)
     out = subprocess.run([sys.executable, "-m", "mathwave", "--list-knobs"], capture_output=True, text=True,
                          env=env, check=True).stdout
     for cls in BUILTIN:
@@ -354,3 +360,18 @@ def test_cli_list_knobs():
     out = subprocess.run([sys.executable, "-m", "mathwave", "--list-knobs", "808"], capture_output=True, text=True,
                          env=env, check=True).stdout
     assert "tau" in out and "[tune.dive]" not in out
+
+
+def test_cli_tests_ignore_the_users_config(tmp_path):
+    """A personal config with extra panels or tuning must not change test results."""
+    env = cli_env(tmp_path)
+    cfg_dir = tmp_path / "xdg" / "mathwave"
+    cfg_dir.mkdir(parents=True)
+    out = subprocess.run([sys.executable, "-m", "mathwave", "--formulas"], capture_output=True, text=True,
+                         env=env, check=True).stdout
+    assert out.count("driven by:") == len(DEFAULT_ORDER)
+    (cfg_dir / "config").write_text("[general]\npanels = 808, bell\n"
+                                    "[panel.bell]\nexpr = A*exp(-x^2)\nparams = A = level\n")
+    out = subprocess.run([sys.executable, "-m", "mathwave", "--formulas"], capture_output=True, text=True,
+                         env=env, check=True).stdout
+    assert out.count("driven by:") == 2  # proves the env really controls which config is read
