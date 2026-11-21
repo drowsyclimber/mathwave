@@ -1,6 +1,6 @@
 pkgbase = mathwave
 	pkgdesc = Cava-style terminal audio visualizer that drives a grid of math functions and prints their formulas
-	pkgver = 0.2.1
+	pkgver = 0.3.0
 	pkgrel = 1
 	url = https://github.com/drowsyclimber/mathwave
 	arch = any
@@ -15,7 +15,7 @@ pkgbase = mathwave
 	optdepends = libpulse: parec capture (works with PulseAudio and pipewire-pulse)
 	optdepends = pipewire: pw-record capture
 	optdepends = alsa-utils: aplay output for --demo --audible
-	source = mathwave-0.2.1.tar.gz::https://github.com/drowsyclimber/mathwave/archive/refs/tags/v0.2.1.tar.gz
-	sha256sums = ddfadf5d2b9abce2c92aaf20d087a41f4240cbf0b111954d1eb60739111010f3
+	source = mathwave-0.3.0.tar.gz::https://github.com/drowsyclimber/mathwave/archive/refs/tags/v0.3.0.tar.gz
+	sha256sums = cd459f9e005c739df286a352434f674d931c2de7a0afea3c7d0550232204263e
 
 pkgname = mathwave
