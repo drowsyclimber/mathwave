@@ -1,4 +1,10 @@
 # Maintainer: Mike Falls <96034740+drowsyclimber@users.noreply.github.com>
+#
+# Build from this checkout:   cd packaging && makepkg -si
+#
+# Builds whatever is in the working tree (including uncommitted changes), so it is
+# the one to use while hacking on mathwave. PKGBUILD.aur builds a tagged release
+# from GitHub, and PKGBUILD-git builds the latest commit on main.
 pkgname=mathwave
 pkgver=0.2.0
 pkgrel=1
@@ -14,23 +20,33 @@ optdepends=(
   'pipewire: pw-record capture'
   'alsa-utils: aplay output for --demo --audible'
 )
-# Local build: run `makepkg -si` next to mathwave-$pkgver.tar.gz.
-# For the AUR, swap this for the GitHub release tarball (see packaging/PKGBUILD.aur).
-source=("$pkgname-$pkgver.tar.gz")
-sha256sums=('SKIP')
+source=()
+
+pkgver() {
+  sed -n 's/^version = "\(.*\)"/\1/p' "$startdir/../pyproject.toml"
+}
+
+prepare() {
+  # Copy the checkout into $srcdir so the build never writes into the repo.
+  rm -rf "$srcdir/$pkgname"
+  mkdir -p "$srcdir/$pkgname"
+  cd "$startdir/.."
+  cp -r LICENSE README.md pyproject.toml config man src tests "$srcdir/$pkgname/"
+  find "$srcdir/$pkgname" -name __pycache__ -prune -exec rm -rf {} +
+}
 
 build() {
-  cd "$pkgname-$pkgver"
+  cd "$pkgname"
   python -m build --wheel --no-isolation
 }
 
 check() {
-  cd "$pkgname-$pkgver"
+  cd "$pkgname"
   PYTHONPATH="$PWD/src" python -m pytest -q
 }
 
 package() {
-  cd "$pkgname-$pkgver"
+  cd "$pkgname"
   python -m installer --destdir="$pkgdir" dist/*.whl
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 man/mathwave.1 "$pkgdir/usr/share/man/man1/mathwave.1"

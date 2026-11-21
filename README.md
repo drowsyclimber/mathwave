@@ -25,13 +25,16 @@ Each panel's title bar has a level meter for its drive signal. Dim curves are gu
 ## Install
 
 ```sh
-# from this folder (the tarball sits next to the PKGBUILD)
+git clone https://github.com/drowsyclimber/mathwave.git
+cd mathwave/packaging
 makepkg -si
 ```
 
+That builds whatever is in your checkout, including local edits. Or download the prebuilt `.pkg.tar.zst` from the [latest release](https://github.com/drowsyclimber/mathwave/releases/latest) and run `sudo pacman -U` on it.
+
 Runtime dependencies are `python` and `python-numpy`. For capture you need one of `libpulse` (provides `parec`, works with pipewire-pulse) or `pipewire` (provides `pw-record`). Most Arch desktops already have both.
 
-`packaging/PKGBUILD.aur` builds from a tagged GitHub release and `packaging/PKGBUILD-git` builds from the repository head, for when you publish it.
+`packaging/PKGBUILD.aur` builds a tagged GitHub release (this is the AUR package) and `packaging/PKGBUILD-git` builds the latest commit on `main`.
 
 ## Use
 

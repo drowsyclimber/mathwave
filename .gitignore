@@ -10,3 +10,6 @@ dist-arch/
 mathwave-*.tar.gz
 src/mathwave-*/
 pkg/
+# makepkg working directories inside packaging/
+packaging/src/
+packaging/pkg/
