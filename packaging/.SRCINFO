@@ -16,6 +16,6 @@ pkgbase = mathwave
 	optdepends = pipewire: pw-record capture
 	optdepends = alsa-utils: aplay output for --demo --audible
 	source = mathwave-0.1.0.tar.gz::https://github.com/drowsyclimber/mathwave/archive/refs/tags/v0.1.0.tar.gz
-	sha256sums = SKIP
+	sha256sums = a934aa5d020097ff0c251ff845b3998c9ebc610d17becaececc8a76c5cde3636
 
 pkgname = mathwave

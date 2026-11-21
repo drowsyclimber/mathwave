@@ -16,7 +16,7 @@ optdepends=(
 )
 # AUR build from the tagged GitHub release.
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('a934aa5d020097ff0c251ff845b3998c9ebc610d17becaececc8a76c5cde3636')
 
 build() {
   cd "$pkgname-$pkgver"
