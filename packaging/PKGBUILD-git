@@ -1,0 +1,41 @@
+# Maintainer: Mike Falls <96034740+drowsyclimber@users.noreply.github.com>
+pkgname=mathwave-git
+_pkgname=mathwave
+pkgver=0.1.0.r0.g0000000
+pkgrel=1
+pkgdesc="Cava-style terminal audio visualizer that drives a grid of math functions (git version)"
+arch=('any')
+url="https://github.com/drowsyclimber/mathwave"
+license=('MIT')
+depends=('python' 'python-numpy')
+makedepends=('git' 'python-build' 'python-installer' 'python-setuptools' 'python-wheel')
+checkdepends=('python-pytest')
+optdepends=('libpulse: parec capture' 'pipewire: pw-record capture' 'alsa-utils: aplay output for --demo --audible')
+provides=("$_pkgname")
+conflicts=("$_pkgname")
+source=("git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$_pkgname"
+  git describe --long --tags 2>/dev/null | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g' ||
+    printf "0.1.0.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+  cd "$_pkgname"
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd "$_pkgname"
+  PYTHONPATH="$PWD/src" python -m pytest -q
+}
+
+package() {
+  cd "$_pkgname"
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 man/mathwave.1 "$pkgdir/usr/share/man/man1/mathwave.1"
+  install -Dm644 config/config "$pkgdir/usr/share/doc/$pkgname/config.example"
+}

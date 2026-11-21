@@ -1,0 +1,101 @@
+.TH MATHWAVE 1 "November 2026" "mathwave 0.1.0" "User Commands"
+.SH NAME
+mathwave \- terminal audio visualizer that drives a grid of math functions
+.SH SYNOPSIS
+.B mathwave
+[\fIoptions\fR]
+.SH DESCRIPTION
+.B mathwave
+captures the audio your system is playing, the same way
+.BR cava (1)
+does, and turns it into a grid of panels. Each panel plots one math
+function, and the music moves that function's parameters. The formula is
+printed under every plot together with its live parameter values.
+.PP
+The default panels are: 808 (exponential decay), dive bomb (1/x), Reese
+(sum-to-product trig identity), screech (tan x), FM wobble, Fourier-series
+saw, sinc, the logistic map, and a classic DFT spectrum.
+.SH OPTIONS
+.TP
+.BR \-i ", " \-\-input " " \fIMETHOD\fR
+auto, pulse, pipewire, fifo, stdin or demo. auto tries
+.BR parec (1)
+first, then
+.BR pw-record (1).
+.TP
+.BR \-s ", " \-\-source " " \fINAME\fR
+PulseAudio source or PipeWire target. Default: monitor of the default output.
+.TP
+.B \-\-demo
+Play the built-in demo track, in which every sound is generated from a formula.
+.TP
+.B \-\-audible
+With \-\-demo, also send the track to your speakers.
+.TP
+.BI \-\-panels " LIST"
+Comma-separated panel keys, for example 808,reese,tan,spectrum.
+.TP
+.BI \-\-layout " auto|COLSxROWS"
+Grid layout.
+.TP
+.BI \-\-theme " NAME"
+phonk, ocean, ember, matrix, mono or wal.
+.TP
+.BI \-\-fps " N"
+Frames per second (default 60).
+.TP
+.BI \-\-sensitivity " X"
+Gain applied after normalization.
+.TP
+.BI \-\-fft\-size " N"
+FFT size: 1024, 2048 (default), 4096 or 8192. Larger sizes separate sub-bass from bass better but react a little later.
+.TP
+.BI \-\-focus " N"
+Start with panel N full screen.
+.TP
+.B \-\-formulas
+Print every panel's formula, drive signal and sound, then exit.
+.TP
+.BI \-\-render\-wav " PATH"
+Write the demo track to a WAV file and exit.
+.TP
+.BI \-\-dump " FRAMES"
+Headless mode: simulate the demo and print the last frame (see \-\-size, \-\-at).
+.TP
+.BI \-p ", " \-\-config " FILE"
+Config file. Default: $XDG_CONFIG_HOME/mathwave/config.
+.SH KEYS
+.TP
+.B 1\-9, 0
+Show that panel full screen with its formula, sound and drive (0 is panel 10). Press the same key again or g to return to the grid.
+.TP
+.B f
+Cycle formula detail: full, formula plus values, hidden.
+.TP
+.B t
+Next color theme.
+.TP
+.B + \-
+Raise or lower gain.
+.TP
+.B p, space
+Pause.
+.TP
+.B q, Esc
+Quit.
+.SH FILES
+.TP
+.I ~/.config/mathwave/config
+User configuration. An annotated example is installed at
+.IR /usr/share/doc/mathwave/config.example .
+.SH EXAMPLES
+.nf
+mathwave
+mathwave \-\-demo \-\-audible
+mathwave \-\-panels 808,dive,reese,tan \-\-layout 2x2
+mathwave \-i fifo \-\-fifo /tmp/mpd.fifo
+.fi
+.SH SEE ALSO
+.BR cava (1),
+.BR parec (1),
+.BR pw-record (1)

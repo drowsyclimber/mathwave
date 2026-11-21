@@ -1,0 +1,66 @@
+# mathwave config. Copy to ~/.config/mathwave/config and edit.
+# Every key is optional; command line flags override these values.
+
+[general]
+framerate = 60
+# Gain applied after the automatic level normalization.
+sensitivity = 1.0
+# Panels in display order. Built-ins: 808, dive, reese, tan, fm, saw, sinc, logistic, spectrum
+# Custom panels defined below can be listed here by their key.
+panels = 808, dive, reese, tan, fm, saw, sinc, logistic, spectrum, bell
+# auto, or COLSxROWS such as 3x3 or 4x2
+layout = auto
+# 0 = no formulas, 1 = formula + live values, 2 = also the identity / pitch law
+formulas = 2
+# Number of bars in the spectrum panel
+bars = 48
+
+[input]
+# auto tries parec (PulseAudio or pipewire-pulse), then pw-record.
+# Other choices: pulse, pipewire, fifo, stdin, demo
+method = auto
+# auto captures the monitor of your default output, like Cava.
+# For pulse: a source name from `pactl list short sources`.
+# For pipewire: a target from `wpctl status`.
+source = auto
+rate = 44100
+channels = 2
+# For method = fifo (for example MPD's fifo output, format 44100:16:2)
+fifo = /tmp/mpd.fifo
+
+[color]
+# phonk, ocean, ember, matrix, mono, or wal (reads ~/.cache/wal/colors.json)
+theme = phonk
+# Optional custom gradient, overrides the theme:
+# gradient = #8a3ffc, #ff3fa4, #ffe14d
+# truecolor, 256 or none
+mode = truecolor
+
+[smoothing]
+# How fast levels rise (0..1, higher is snappier) and fall (0..1, higher is slower).
+attack = 0.65
+decay = 0.90
+# Anything quieter than this reads as silence.
+noise_floor_db = -75
+# Window of loudness mapped onto 0..1, measured down from the recent peak.
+dynamic_range_db = 40
+# Analysis window. 2048 (46 ms) is snappiest. 4096 (93 ms) has 10.8 Hz bins and keeps
+# bass notes around 80 Hz out of the sub band; use it if a panel listens to sub.
+# 1024, 2048, 4096 or 8192.
+fft_size = 2048
+
+# Custom panels: write your own formula. y is plotted over x in `domain`.
+# Drive names you can use in params: sub bass lowmid mid highmid presence air rms centroid t beat
+# Functions: sin cos tan exp log sqrt abs tanh sinh cosh arcsin arccos arctan sinc sign floor mod clip min max
+# Constants: pi e tau. Use ^ or ** for powers.
+# Optional keys: title, domain, yrange, drive (feeds the level meter), sound (shown in focus view).
+#
+# Gaussian bell driven by bass: louder bass makes the bell taller and wider.
+[panel.bell]
+title = bell · gaussian
+expr = A*exp(-x^2/(2*s^2))
+params = A = 0.15 + 0.85*bass, s = 0.06 + 0.30*bass
+domain = -1, 1
+yrange = -0.05, 1.05
+drive = bass
+sound = A soft kick thump: the Gaussian is the smoothest pulse, with no sharp edges to click.
