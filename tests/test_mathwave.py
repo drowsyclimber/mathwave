@@ -375,3 +375,17 @@ def test_cli_tests_ignore_the_users_config(tmp_path):
     out = subprocess.run([sys.executable, "-m", "mathwave", "--formulas"], capture_output=True, text=True,
                          env=env, check=True).stdout
     assert out.count("driven by:") == 2  # proves the env really controls which config is read
+
+
+@pytest.mark.parametrize("text,needle", [
+    ("[tune.808]\ndrive = sub\ndrive = bass\n", "option 'drive' in section 'tune.808' already exists"),
+    ("drive = sub\n", "no section headers"),
+    ("[general]\nframerate = fast\n", "invalid literal"),
+])
+def test_malformed_config_gives_a_clean_error(tmp_path, text, needle):
+    cfg_file = tmp_path / "config"
+    cfg_file.write_text(text)
+    with pytest.raises(SystemExit, match="config error") as exc:
+        load(str(cfg_file))
+    assert needle in str(exc.value)
+    assert "Traceback" not in str(exc.value)

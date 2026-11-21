@@ -1,6 +1,6 @@
 # Maintainer: Mike Falls <96034740+drowsyclimber@users.noreply.github.com>
 pkgname=mathwave
-pkgver=0.2.0
+pkgver=0.2.1
 pkgrel=1
 pkgdesc="Cava-style terminal audio visualizer that drives a grid of math functions and prints their formulas"
 arch=('any')

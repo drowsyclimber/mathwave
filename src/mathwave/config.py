@@ -85,13 +85,27 @@ def load(path: str | None = None) -> Config:
     if not os.path.exists(path):
         return cfg
     cp = configparser.ConfigParser(inline_comment_prefixes=(";", "#"), interpolation=None)
-    cp.read(path)
+    try:
+        cp.read(path)
+    except configparser.Error as exc:
+        # Duplicate keys or sections, a key outside any section, and so on.
+        msg = " ".join(str(exc).split())
+        raise SystemExit(f"mathwave: config error: {msg}")
     cfg.path = path
     g = cp["general"] if cp.has_section("general") else {}
     i = cp["input"] if cp.has_section("input") else {}
     c = cp["color"] if cp.has_section("color") else {}
     s = cp["smoothing"] if cp.has_section("smoothing") else {}
 
+    try:
+        _read_values(cfg, g, i, c, s)
+    except ValueError as exc:
+        raise SystemExit(f"mathwave: config error in {path}: {exc}")
+    _read_panels(cfg, cp, path)
+    return cfg
+
+
+def _read_values(cfg: Config, g, i, c, s) -> None:
     cfg.framerate = int(g.get("framerate", cfg.framerate))
     cfg.sensitivity = float(g.get("sensitivity", cfg.sensitivity))
     if g.get("panels"):
@@ -117,6 +131,8 @@ def load(path: str | None = None) -> Config:
     cfg.dynamic_range_db = float(s.get("dynamic_range_db", cfg.dynamic_range_db))
     cfg.fft_size = check_fft_size(int(s.get("fft_size", cfg.fft_size)))
 
+
+def _read_panels(cfg: Config, cp: configparser.ConfigParser, path: str) -> None:
     for name in cp.sections():
         if name.startswith("tune."):
             key = name.split(".", 1)[1].strip()
@@ -141,4 +157,3 @@ def load(path: str | None = None) -> Config:
             raise SystemExit(f"mathwave: [{name}] in {path} is missing {exc}")
         except (ValueError, SyntaxError) as exc:
             raise SystemExit(f"mathwave: bad [{name}] in {path}: {exc}")
-    return cfg

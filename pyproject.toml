@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mathwave"
-version = "0.2.0"
+version = "0.2.1"
 description = "Cava-style terminal audio visualizer that drives a grid of math functions and prints their formulas"
 readme = "README.md"
 license = "MIT"
