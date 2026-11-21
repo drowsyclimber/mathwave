@@ -22,7 +22,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .dsp import DRIVES, Features
+from .dsp import Features, Follower, Smoothing, drive_names
 
 TAU = 2.0 * np.pi
 
@@ -41,12 +41,58 @@ _NODES = (
     ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow, ast.Mod, ast.FloorDiv, ast.USub, ast.UAdd,
     ast.Compare, ast.Lt, ast.Gt, ast.LtE, ast.GtE,
 )
-DRIVE_NAMES = set(DRIVES)
+DRIVE_NAMES = drive_names()
 
 
-def compile_expr(src: str, names: set[str]):
-    """Compile a math expression after checking it only uses safe syntax and names."""
+def _num(node) -> float | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return float(node.value)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        v = _num(node.operand)
+        return None if v is None else -v
+    return None
+
+
+def band_name(kind: str, lo: float, hi: float) -> str:
+    fmt = lambda v: f"{v:g}".replace(".", "p")  # noqa: E731
+    return f"{kind}_{fmt(lo)}_{fmt(hi)}"
+
+
+class _InlineBands(ast.NodeTransformer):
+    """Rewrite band(lo, hi) and peak(lo, hi) into names the analyzer will provide."""
+
+    def __init__(self, src: str):
+        self.src = src
+        self.found: dict[str, tuple[float, float, str]] = {}
+
+    def visit_Call(self, node):
+        self.generic_visit(node)
+        if isinstance(node.func, ast.Name) and node.func.id in ("band", "peak"):
+            if len(node.args) != 2 or node.keywords:
+                raise ValueError(f"'{self.src}': {node.func.id}() takes two numbers, e.g. {node.func.id}(40, 90)")
+            lo, hi = _num(node.args[0]), _num(node.args[1])
+            if lo is None or hi is None:
+                raise ValueError(f"'{self.src}': {node.func.id}() needs plain numbers, e.g. {node.func.id}(40, 90)")
+            if not (0 < lo < hi <= 24000):
+                raise ValueError(f"'{self.src}': {node.func.id}({lo:g}, {hi:g}) needs 0 < lo < hi <= 24000 Hz")
+            mode = "peak" if node.func.id == "peak" else "mean"
+            name = band_name(node.func.id, lo, hi)
+            self.found[name] = (lo, hi, mode)
+            return ast.copy_location(ast.Name(id=name, ctx=ast.Load()), node)
+        return node
+
+
+def compile_expr(src: str, names: set[str], inline: dict | None = None):
+    """Compile a math expression after checking it only uses safe syntax and names.
+
+    band(lo, hi) / peak(lo, hi) are allowed when `inline` is given; the bands they need
+    are added to it as name -> (lo, hi, mode)."""
     tree = ast.parse(src.replace("^", "**"), mode="eval")
+    if inline is not None:
+        tr = _InlineBands(src)
+        tree = ast.fix_missing_locations(tr.visit(tree))
+        inline.update(tr.found)
+        names = set(names) | set(tr.found)
     for node in ast.walk(tree):
         if not isinstance(node, _NODES):
             raise ValueError(f"'{src}': {type(node).__name__} is not allowed")
@@ -66,7 +112,7 @@ def _eval(code, env) -> float:
 # ---------------------------------------------------------------- tuning
 
 COMMON_KEYS = {
-    "drive": "band or expression for the level, e.g. sub or max(sub, 0.7*bass)",
+    "drive": "what it listens to: a band, a feature, band(lo, hi), or e.g. max(sub, 0.7*bass)",
     "gain": "multiply the level before shaping (default 1)",
     "threshold": "ignore everything below this level, 0..1 (default 0)",
     "curve": "exponent: 1 linear, 2 punchier, 0.5 more sensitive (default 1)",
@@ -74,6 +120,9 @@ COMMON_KEYS = {
     "max": "level the panel peaks at, 0..1 (default 1); min > max inverts",
     "attack": "this panel's rise speed, 0..1, higher is snappier (default: global)",
     "decay": "this panel's fall speed, 0..1, higher is slower (default: global)",
+    "attack_ms": "time to rise 90% of the way, in ms (frame-rate independent)",
+    "decay_ms": "time to fall 90% of the way, in ms (frame-rate independent)",
+    "hold_ms": "hold each peak this long before falling, in ms",
 }
 
 
@@ -86,10 +135,26 @@ class Tuning:
     hi: float = 1.0
     attack: float | None = None
     decay: float | None = None
+    attack_ms: float | None = None
+    decay_ms: float | None = None
+    hold_ms: float | None = None
 
     @property
     def own_smoothing(self) -> bool:
-        return self.attack is not None or self.decay is not None
+        return any(v is not None for v in (self.attack, self.decay, self.attack_ms, self.decay_ms, self.hold_ms))
+
+    def smoothing(self, base: Smoothing) -> Smoothing:
+        """This panel's smoothing: its own keys over the global [smoothing] values.
+        Setting a per-frame factor here also overrides a global *_ms value."""
+        attack_ms = self.attack_ms if self.attack_ms is not None else (None if self.attack is not None else base.attack_ms)
+        decay_ms = self.decay_ms if self.decay_ms is not None else (None if self.decay is not None else base.decay_ms)
+        return Smoothing(
+            attack=self.attack if self.attack is not None else base.attack,
+            decay=self.decay if self.decay is not None else base.decay,
+            attack_ms=attack_ms,
+            decay_ms=decay_ms,
+            hold_ms=self.hold_ms if self.hold_ms is not None else base.hold_ms,
+        )
 
     @property
     def is_default(self) -> bool:
@@ -118,6 +183,10 @@ class Tuning:
             parts.append(f"attack={self.attack:g}")
         if self.decay is not None:
             parts.append(f"decay={self.decay:g}")
+        for k in ("attack_ms", "decay_ms", "hold_ms"):
+            v = getattr(self, k)
+            if v is not None:
+                parts.append(f"{k}={v:g}")
         return " ".join(parts)
 
 
@@ -160,24 +229,40 @@ class Panel:
     KNOBS: dict[str, tuple[float, str]] = {}
     INT_KNOBS: set[str] = set()
 
-    def __init__(self):
+    def __init__(self, names: set[str] | None = None):
         self.p: dict[str, float] = {}
         self.level = 0.0
         self.k = {name: v for name, (v, _) in self.KNOBS.items()}
+        self.k_expr: dict[str, object] = {}
+        self.k_src: dict[str, str] = {}
         self.tune = Tuning()
-        self.global_attack = 0.65
-        self.global_decay = 0.90
+        self.names = set(names) if names is not None else set(DRIVE_NAMES)
+        self.inline: dict[str, tuple[float, float, str]] = {}
+        self.base_smoothing = Smoothing()
+        self._follow: Follower | None = None
         self.set_drive(self.default_drive)
 
     # -- tuning
 
     def set_drive(self, src: str) -> None:
-        self._drive_code = compile_expr(src, DRIVE_NAMES)
+        self._drive_code = compile_expr(src, self.names, self.inline)
         self.drive = src.strip()
 
-    def configure(self, section: dict[str, str], global_attack: float = 0.65, global_decay: float = 0.90) -> None:
-        """Apply a [tune.<key>] section. Raises ValueError with a readable message."""
-        self.global_attack, self.global_decay = global_attack, global_decay
+    @property
+    def global_attack(self) -> float:  # kept for older callers
+        return self.base_smoothing.attack
+
+    @property
+    def global_decay(self) -> float:
+        return self.base_smoothing.decay
+
+    def configure(self, section: dict[str, str], global_attack: float | Smoothing = 0.65, global_decay: float = 0.90) -> None:
+        """Apply a [tune.<key>] section. Raises ValueError with a readable message.
+        The second argument is the global Smoothing (or, for older callers, attack)."""
+        if isinstance(global_attack, Smoothing):
+            self.base_smoothing = global_attack
+        else:
+            self.base_smoothing = Smoothing(attack=global_attack, decay=global_decay)
         t = Tuning()
         for raw_key, val in section.items():
             key = raw_key.strip().lower()
@@ -198,7 +283,16 @@ class Panel:
                 t.attack = _float(key, val, 0.0, 1.0, lo_open=True)
             elif key == "decay":
                 t.decay = _float(key, val, 0.0, 1.0, hi_open=True)
+            elif key in ("attack_ms", "decay_ms", "hold_ms"):
+                setattr(t, key, _float(key, val, 0.0, 60000.0))
             elif key in self.k:
+                try:
+                    v = float(val)
+                except ValueError:
+                    # A knob can be an expression of drives, e.g. a = 8 + 16*pitch
+                    self.k_expr[key] = compile_expr(val, self.names | {"level"}, self.inline)
+                    self.k_src[key] = val
+                    continue
                 v = _float(key, val)
                 if key in self.INT_KNOBS:
                     if v < 1:
@@ -211,23 +305,27 @@ class Panel:
                 hint = f" (did you mean {close[0]}?)" if close else ""
                 raise ValueError(f"unknown key '{key}'{hint}; see mathwave --list-knobs {self.key}")
         self.tune = t
-        self._smoothed = None
+        self._follow = Follower(t.smoothing(self.base_smoothing)) if t.own_smoothing else None
 
-    def drive_level(self, f: Features) -> float:
+    def drive_level(self, f: Features, dt: float = 1 / 60) -> float:
         """The panel's tuned 0..1 level for this frame."""
-        own = self.tune.own_smoothing
+        own = self._follow is not None
         levels = f.raw if own else f.levels
-        x = float(self.tune.shape(_eval(self._drive_code, levels)))
-        if not own:
-            return x
-        attack = self.tune.attack if self.tune.attack is not None else self.global_attack
-        decay = self.tune.decay if self.tune.decay is not None else self.global_decay
-        prev = getattr(self, "_smoothed", None)
-        if prev is None:
-            prev = x
-        prev = prev + (x - prev) * attack if x > prev else max(x, prev * decay)
-        self._smoothed = prev
-        return prev
+        x = float(self.tune.shape(_eval(self._drive_code, _with_defaults(levels, self.inline))))
+        return float(self._follow(x, dt)) if own else x
+
+    def refresh_knobs(self, f: Features) -> None:
+        """Evaluate knobs that are expressions of drives (smoothed levels)."""
+        if not self.k_expr:
+            return
+        env = _with_defaults(dict(f.levels, level=self.level), self.inline)
+        for name, code in self.k_expr.items():
+            v = _eval(code, env)
+            if not math.isfinite(v):
+                continue
+            if name in self.INT_KNOBS:
+                v = float(max(1, int(round(v))))
+            self.k[name] = v
 
     def tuning_summary(self) -> str:
         parts = []
@@ -236,13 +334,15 @@ class Panel:
         s = self.tune.summary()
         if s:
             parts.append(s)
-        changed = [f"{n}={v:g}" for n, v in self.k.items() if v != self.KNOBS[n][0]]
+        changed = [f"{n}={self.k_src[n].replace(' ', '')}" if n in self.k_src else f"{n}={v:g}"
+                   for n, v in self.k.items() if n in self.k_src or v != self.KNOBS[n][0]]
         return " ".join(parts + changed)
 
     # -- drawing
 
     def update(self, f: Features, dt: float) -> None:
-        self.level = self.drive_level(f)
+        self.level = self.drive_level(f, dt)
+        self.refresh_knobs(f)
 
     def layers(self, x: np.ndarray) -> list[tuple]:
         """Return a list of layers: ("curve", y, style) | ("hline", y0, style) |
@@ -251,6 +351,14 @@ class Panel:
 
     def live(self) -> str:
         return " ".join(f"{k}={v:.2f}" for k, v in self.p.items())
+
+
+def _with_defaults(levels: dict, inline: dict) -> dict:
+    """Inline bands read 0 until the analyzer has produced them."""
+    if not inline:
+        return levels
+    missing = {k: 0.0 for k in inline if k not in levels}
+    return {**levels, **missing} if missing else levels
 
 
 def _lerp(lo: float, hi: float, t: float) -> float:
@@ -275,8 +383,8 @@ class Exp808(Panel):
         "reveal": (0.35, "seconds to redraw the curve after each kick (0 = no redraw)"),
     }
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, names=None):
+        super().__init__(names)
         self.reveal = 1.0
 
     def update(self, f, dt):
@@ -324,8 +432,8 @@ class DiveBomb(Panel):
         "beats": (2.0, "beats per asymptote sweep cycle"),
     }
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, names=None):
+        super().__init__(names)
         self.phase = 0.0
 
     def update(self, f, dt):
@@ -362,8 +470,8 @@ class Reese(Panel):
         "drift": (6.0, "extra scroll speed at level 1"),
     }
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, names=None):
+        super().__init__(names)
         self.phase = 0.0
 
     def update(self, f, dt):
@@ -399,8 +507,8 @@ class TanScreech(Panel):
         "scroll": (1.5, "extra scroll speed at level 1"),
     }
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, names=None):
+        super().__init__(names)
         self.phi = 0.0
 
     def update(self, f, dt):
@@ -436,8 +544,8 @@ class FMWobble(Panel):
         "beats": (1.0, "beats per φ cycle (0.5 = twice per beat)"),
     }
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, names=None):
+        super().__init__(names)
         self.phi = 0.0
         self.bpm = 0.0
 
@@ -475,8 +583,8 @@ class FourierSaw(Panel):
     }
     INT_KNOBS = {"n_min", "n_max"}
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, names=None):
+        super().__init__(names)
         self.phase = 0.0
         self.hz = 0.0
 
@@ -545,8 +653,8 @@ class Logistic(Panel):
     }
     INT_KNOBS = {"steps"}
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, names=None):
+        super().__init__(names)
         self.hist = np.full(self.HISTORY, 0.5)
         self.x = 0.4
         self.p = {"r": 2.8}
@@ -604,15 +712,8 @@ class Spectrum(Panel):
     def update(self, f, dt):
         super().update(f, dt)
         t = self.tune
-        if t.own_smoothing:
-            target = t.shape(f.raw_spectrum)
-            prev = getattr(self, "_bars", None)
-            if prev is None or len(prev) != len(target):
-                prev = target.copy()
-            attack = t.attack if t.attack is not None else self.global_attack
-            decay = t.decay if t.decay is not None else self.global_decay
-            self._bars = np.where(target > prev, prev + (target - prev) * attack, np.maximum(target, prev * decay))
-            self.bars = self._bars
+        if self._follow is not None:
+            self.bars = self._follow(t.shape(f.raw_spectrum), dt)
         else:
             self.bars = f.spectrum if t.is_default else t.shape(f.spectrum)
         self.n = f.fft_size
@@ -642,12 +743,11 @@ class ExprPanel(Panel):
     In params, `level` is the panel's tuned level: its drive after any [tune.<key>] shaping.
     """
 
-    drive_names = DRIVE_NAMES | {"t", "beat", "level"}
-
     def __init__(self, key: str, expr: str, params: dict[str, str], title: str | None = None,
-                 domain=(-1.0, 1.0), yrange=(-1.1, 1.1), drive: str = "rms", sound: str | None = None):
+                 domain=(-1.0, 1.0), yrange=(-1.1, 1.1), drive: str = "rms", sound: str | None = None,
+                 names: set[str] | None = None):
         self.default_drive = drive
-        super().__init__()
+        super().__init__(names)
         self.key = key
         self.title = title or f"{key} · custom"
         self.expr_src = expr
@@ -656,12 +756,13 @@ class ExprPanel(Panel):
         self.sound = sound or "User-defined formula from the config file."
         self.domain = tuple(domain)
         self.yrange = tuple(yrange)
-        self.param_code = {k: compile_expr(v, self.drive_names) for k, v in params.items()}
+        pnames = self.names | {"t", "beat", "level"}
+        self.param_code = {k: compile_expr(v, pnames, self.inline) for k, v in params.items()}
         self.code = compile_expr(expr, set(params) | {"x", "t"})
 
     def update(self, f, dt):
         super().update(f, dt)
-        env = dict(f.levels, t=f.t, beat=f.beat_period, level=self.level)
+        env = _with_defaults(dict(f.levels, t=f.t, beat=f.beat_period, level=self.level), self.inline)
         self.p = {k: _eval(c, env) for k, c in self.param_code.items()}
         self.t = f.t
 
@@ -682,9 +783,15 @@ DEFAULT_ORDER = [cls.key for cls in BUILTIN]
 
 def make_panels(keys: list[str], custom: dict[str, ExprPanel] | None = None,
                 tune: dict[str, dict[str, str]] | None = None,
-                global_attack: float = 0.65, global_decay: float = 0.90) -> list[Panel]:
+                global_attack: float = 0.65, global_decay: float = 0.90,
+                names: set[str] | None = None, smoothing: Smoothing | None = None) -> list[Panel]:
+    """Build the panels in display order and apply their [tune.*] sections.
+
+    names: every drive name the analyzer provides (built-ins plus [bands]).
+    smoothing: the global [smoothing] settings, the default for per-panel smoothing."""
     custom = custom or {}
     tune = tune or {}
+    base = smoothing or Smoothing(attack=global_attack, decay=global_decay)
     known = set(BY_KEY) | set(custom)
     for k in tune:
         if k not in known:
@@ -697,12 +804,20 @@ def make_panels(keys: list[str], custom: dict[str, ExprPanel] | None = None,
         if k in custom:
             p = custom[k]
         elif k in BY_KEY:
-            p = BY_KEY[k]()
+            p = BY_KEY[k](names)
         else:
             raise SystemExit(f"mathwave: unknown panel '{k}'. Built-in panels: {', '.join(DEFAULT_ORDER)}")
         try:
-            p.configure(tune.get(k, {}), global_attack, global_decay)
+            p.configure(tune.get(k, {}), base)
         except (ValueError, SyntaxError) as exc:
             raise SystemExit(f"mathwave: [tune.{k}]: {exc}")
         out.append(p)
+    return out
+
+
+def inline_bands(panels: list[Panel]) -> dict[str, tuple[float, float, str]]:
+    """Every band(lo, hi) / peak(lo, hi) the panels' expressions need."""
+    out: dict[str, tuple[float, float, str]] = {}
+    for p in panels:
+        out.update(p.inline)
     return out

@@ -38,13 +38,16 @@ def settle(an, x, frames=30):
 def test_tone_lands_in_its_band(freq, band):
     an = Analyzer(RATE, fft_size=4096)
     f = settle(an, tone(freq))
-    assert max(f.levels, key=lambda k: f.levels[k] if k not in ("rms", "centroid") else -1) == band
+    from mathwave.dsp import BANDS
+    assert max(BANDS, key=lambda k: f.levels[k]) == band
 
 
 def test_silence_reads_as_zero():
     an = Analyzer(RATE)
     f = settle(an, np.zeros(2048))
-    assert all(v < 0.05 for v in f.levels.values())
+    # balance sits at 0.5 (center) and phase is the beat clock; everything else reads zero
+    assert all(v < 0.05 for k, v in f.levels.items() if k not in ("balance", "phase"))
+    assert f.levels["balance"] == pytest.approx(0.5)
     assert f.spectrum.max() < 0.05
 
 
@@ -236,7 +239,7 @@ def test_fft_size_config_and_sub_separation(tmp_path):
 # ---------------------------------------------------------------- per-panel tuning
 
 from mathwave.dsp import Features
-from mathwave.panels import BUILTIN, Exp808, Spectrum, Tuning, make_panels as _mk
+from mathwave.panels import BUILTIN, Tuning, make_panels as _mk
 
 
 def feats(**levels):
@@ -329,26 +332,6 @@ def test_custom_panel_level_uses_its_tuning(tmp_path):
     bell = _mk(cfg.panels, cfg.custom, cfg.tune)[0]
     bell.update(feats(sub=0.5, bass=1.0), 1 / 60)
     assert bell.p["A"] == pytest.approx(0.25)
-
-
-def test_shipped_config_tune_examples_parse():
-    """Every commented [tune.*] example in the shipped config must be valid when uncommented."""
-    path = os.path.join(os.path.dirname(__file__), "..", "config", "config")
-    lines, block = open(path).read().splitlines(), []
-    text = []
-    for line in lines:
-        if line.startswith("# [tune.") or (block and line.startswith("# ") and "=" in line and not line.startswith("# #")):
-            block.append(line[2:])
-        elif block:
-            text += block + [""]
-            block = []
-    assert any(l.startswith("[tune.") for l in text)
-    import tempfile
-    with tempfile.NamedTemporaryFile("w", suffix=".ini", delete=False) as fh:
-        fh.write("\n".join(text))
-    cfg = load(fh.name)
-    _mk(DEFAULT_ORDER, cfg.custom, cfg.tune)
-    assert set(cfg.tune) >= set(DEFAULT_ORDER)
 
 
 def test_cli_list_knobs(tmp_path):

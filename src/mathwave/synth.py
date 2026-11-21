@@ -60,8 +60,13 @@ def fourier_saw(t: np.ndarray, f: np.ndarray, n: int = 14) -> np.ndarray:
     return (2.0 / np.pi) * y
 
 
-def render(t: np.ndarray, layers: int | None = None) -> np.ndarray:
-    """Render the demo at absolute times t (seconds). Returns float32 in -1..1."""
+def render(t: np.ndarray, layers: int | None = None, stereo: bool = False) -> np.ndarray:
+    """Render the demo at absolute times t (seconds). Returns float32 in -1..1.
+
+    With stereo=True returns shape (n, 2). Kick, dive, Reese and wobble sit in the
+    center; the screech ping-pongs between the speakers each bar and the saw arpeggio
+    pans across the stereo field, so the stereo drives (balance, side, width) move.
+    The mid channel (L+R)/2 equals the mono render."""
     t = np.asarray(t, dtype=np.float64)
     pos = t / BEAT
     section = np.floor(pos / SECTION_BEATS).astype(np.int64) % N_LAYERS
@@ -73,6 +78,7 @@ def render(t: np.ndarray, layers: int | None = None) -> np.ndarray:
 
     notes = np.array([55.0, 55.0, 65.41, 49.0])[bar % 4]
     out = 0.85 * kick_808(tb)
+    panned = []  # (signal, pan in -1..1)
 
     gate = (section >= 1) & (bar_beat >= 2.0)
     out += np.where(gate, 0.22 * dive_bomb((bar_beat - 2.0) * BEAT), 0.0)
@@ -83,26 +89,39 @@ def render(t: np.ndarray, layers: int | None = None) -> np.ndarray:
 
     gate = (section >= 3) & ((pos % 1.0) >= 0.5) & ((pos % 1.0) < 0.75)
     sweep = 880.0 * 2.0 ** ((pos % 4.0) / 4.0)
-    out += np.where(gate, 0.10 * screech(t, sweep), 0.0)
+    scr = np.where(gate, 0.10 * screech(t, sweep), 0.0)
+    out += scr
+    panned.append((scr, np.where(bar % 2 == 0, -0.8, 0.8)))
 
     gate = section >= 4
     out += np.where(gate, 0.16 * duck * fm_wobble(t, pos), 0.0)
 
     gate = (section >= 5) & ((pos * 4.0) % 1.0 < 0.6)
     arp = np.array([440.0, 523.25, 659.25, 880.0])[np.floor(pos * 4.0).astype(np.int64) % 4]
-    out += np.where(gate, 0.07 * fourier_saw(t, arp), 0.0)
+    saw = np.where(gate, 0.07 * fourier_saw(t, arp), 0.0)
+    out += saw
+    panned.append((saw, np.sin(TAU * pos / 8.0) * 0.9))
 
-    return (0.9 * np.tanh(out)).astype(np.float32)
+    if not stereo:
+        return (0.9 * np.tanh(out)).astype(np.float32)
+    # Move each panned layer from the center towards one side; mid stays equal to mono.
+    side = np.zeros_like(out)
+    for sig, pan in panned:
+        side += sig * pan
+    left, right = out + side, out - side
+    mono = 0.9 * np.tanh(out)
+    gain = np.where(np.abs(out) > 1e-9, mono / np.where(np.abs(out) > 1e-9, out, 1.0), 0.9)
+    return np.stack([left * gain, right * gain], axis=1).astype(np.float32)
 
 
 def write_wav(path: str, seconds: float = 42.0, rate: int = 44100) -> None:
     n = int(seconds * rate)
     with wave.open(path, "wb") as w:
-        w.setnchannels(1)
+        w.setnchannels(2)
         w.setsampwidth(2)
         w.setframerate(rate)
         step = rate  # one second at a time keeps memory flat
         for start in range(0, n, step):
             t = np.arange(start, min(n, start + step)) / rate
-            pcm = (render(t) * 32767.0).astype("<i2")
+            pcm = (np.clip(render(t, stereo=True), -1, 1) * 32767.0).astype("<i2")
             w.writeframes(pcm.tobytes())

@@ -1,5 +1,6 @@
 # mathwave config. Copy to ~/.config/mathwave/config and edit.
 # Every key is optional; command line flags override these values.
+# Press r while mathwave runs to reload this file, and m to see every live level.
 
 [general]
 framerate = 60
@@ -14,6 +15,8 @@ layout = auto
 formulas = 2
 # Number of bars in the spectrum panel
 bars = 48
+# Profile to start with (see the end of this file). Shift+P cycles profiles live.
+# profile = phonk
 
 [input]
 # auto tries parec (PulseAudio or pipewire-pulse), then pw-record.
@@ -24,12 +27,14 @@ method = auto
 # For pipewire: a target from `wpctl status`.
 source = auto
 rate = 44100
+# 2 keeps left and right apart, which the stereo drives (balance, width, side) need.
 channels = 2
 # For method = fifo (for example MPD's fifo output, format 44100:16:2)
 fifo = /tmp/mpd.fifo
 
 [color]
-# phonk, ocean, ember, matrix, mono, or wal (reads ~/.cache/wal/colors.json)
+# phonk, ocean, ember, matrix, mono, wal (reads ~/.cache/wal/colors.json),
+# or chroma, which recolors everything by the note that is playing (C red, round the wheel to B).
 theme = phonk
 # Optional custom gradient, overrides the theme:
 # gradient = #8a3ffc, #ff3fa4, #ffe14d
@@ -38,20 +43,79 @@ mode = truecolor
 
 [smoothing]
 # How fast levels rise (0..1, higher is snappier) and fall (0..1, higher is slower).
+# These act per frame, so they feel different at 30 and 144 fps.
 attack = 0.65
 decay = 0.90
+# The same thing in milliseconds: time to cover 90% of a change. These win over
+# attack and decay when set, and feel the same at any frame rate.
+# attack_ms = 15
+# decay_ms = 250
+# Hold a peak this long before it starts to fall (0 = off).
+# hold_ms = 80
 # Anything quieter than this reads as silence.
 noise_floor_db = -75
 # Window of loudness mapped onto 0..1, measured down from the recent peak.
 dynamic_range_db = 40
+# How fast that recent peak forgets, in dB per second. Lower keeps quiet songs quiet.
+fall_db_per_s = 6
+
+[analysis]
 # Analysis window. 2048 (46 ms) is snappiest. 4096 (93 ms) has 10.8 Hz bins and keeps
-# bass notes around 80 Hz out of the sub band; use it if a panel listens to sub.
-# 1024, 2048, 4096 or 8192.
+# bass notes around 80 Hz out of the sub band. 1024, 2048, 4096, 8192 or 16384.
 fft_size = 2048
+# Multi-resolution: bands entirely below split_hz use low_fft (fine bass detail),
+# bands entirely above use high_fft (fast highs). Bands across the split use fft_size.
+# multires = on
+# low_fft = 8192
+# high_fft = 1024
+# split_hz = 250
+# Spectral tilt in dB per octave around 1 kHz. Music falls off at the top, so 3 to 4.5
+# makes the highs move as much as the bass. Or weighting = a for the A-weighting curve.
+# tilt = 3
+# weighting = a
+# Where the pitch drive looks for a bass note, in Hz.
+# pitch_range = 30-300
+
+# Custom bands become drive names you can use anywhere a band works. Overriding a
+# built-in name (sub, bass, lowmid, mid, highmid, presence, air) changes it everywhere.
+# After LO-HI, optional words:
+#   peak          loudest bin instead of the average (tight for kicks and single notes)
+#   range=25      this band's own dynamic range in dB (smaller is jumpier)
+#   floor=-70     this band's own noise floor in dB
+#   fall=4        this band's own peak fall rate in dB/s
+#   fft=8192      this band's own FFT size
+#   norm=shared   scale with the other shared bands instead of on its own
+# You can also skip this section and write band(40, 90) or peak(40, 90) straight
+# into any drive or expression.
+# [bands]
+# kickband = 40-90 peak range=25
+# snarebody = 180-300 peak
+# vocal = 300-3000
+# bass = 50-200
+
+[onsets]
+# Kick, snare and hat triggers: each jumps to 1 on a hit and decays over envelope_ms.
+# Use them as drives (drive = kick). Ranges join with +.
+kick = 30-150
+snare = 180-400 + 2000-5000
+hat = 7000-16000
+# Higher needs a bigger jump to count as a hit.
+sensitivity = 1.5
+# Ignore a second hit closer than this.
+refractory_ms = 120
+envelope_ms = 200
+
+[tempo]
+# auto detects BPM from kicks; a number fixes it. Tap b in the app to set it by ear
+# (B goes back). The multiplier scales the beat clock: 2 is double time, 0.5 half time.
+bpm = auto
+multiplier = 1
+# Detected tempos fold by octaves into this range, so a 168 BPM track can read as 84.
+range = 70-180
 
 # Custom panels: write your own formula. y is plotted over x in `domain`.
 # Names you can use in params: level (this panel's drive after [tune.<key>] shaping),
-# sub bass lowmid mid highmid presence air rms centroid t beat
+# t, beat, every band and feature (run `mathwave --list-features`), and band(lo, hi).
 # Functions: sin cos tan exp log sqrt abs tanh sinh cosh arcsin arccos arctan sinc sign floor mod clip min max
 # Constants: pi e tau. Use ^ or ** for powers.
 # Optional keys: title, domain, yrange, drive (feeds the level meter), sound (shown in focus view).
@@ -73,23 +137,26 @@ sound = A soft kick thump: the Gaussian is the smoothest pulse, with no sharp ed
 # Press r while mathwave runs to reload this file without restarting.
 #
 # Keys every panel accepts:
-#   drive       what the panel listens to: a band (sub bass lowmid mid highmid presence air),
-#               rms (loudness), centroid (brightness), or an expression like max(sub, 0.7*bass)
+#   drive       what the panel listens to: a band, a feature (rms, centroid, rolloff,
+#               flatness, flux, pitch, note, kick, snare, hat, balance, width and more),
+#               band(lo, hi), or an expression like max(sub, 0.7*bass)
 #   gain        multiply the level first (default 1)
 #   threshold   ignore anything below this, 0..1 (default 0)
 #   curve       1 linear, 2 punchier, 0.5 more sensitive (default 1)
 #   min, max    the range the panel moves within, 0..1 (default 0 and 1; min > max inverts)
 #   attack      this panel's rise speed, 0..1 (default: [smoothing] attack)
 #   decay       this panel's fall speed, 0..1 (default: [smoothing] decay)
-# The order is: drive -> gain -> threshold -> curve -> min..max -> attack/decay.
+#   attack_ms, decay_ms, hold_ms   the same in milliseconds, as in [smoothing]
+# The order is: drive -> gain -> threshold -> curve -> min..max -> smoothing.
 # Each panel also has its own knobs for its formula's constants (shown below with examples).
+# A knob can be a number or an expression of drives, like a = 8 + 16*pitch.
 # The examples are commented out; remove the leading "# " to use one.
 
 # Kick only, tight and punchy, with a longer pitch drop.
 # [tune.808]
-# drive = sub
+# drive = max(kick, peak(40, 90))
 # curve = 2
-# decay = 0.85
+# decay_ms = 180
 # tau = 0.3
 # reveal = 0.25
 
@@ -100,15 +167,17 @@ sound = A soft kick thump: the Gaussian is the smoothest pulse, with no sharp ed
 # sweep = 0.9
 
 # Only growls on real bass lines, with a heavier maximum detune.
+# The base frequency follows the bass note, so higher notes draw faster waves.
 # [tune.reese]
 # drive = lowmid
 # threshold = 0.2
 # detune_max = 8
 # attack = 0.4
+# a = 8 + 16*pitch
 
 # Twitchier screech that reacts to hi-hats and snares.
 # [tune.tan]
-# drive = highmid
+# drive = max(hat, snare)
 # attack = 0.9
 # decay = 0.7
 # freq_max = 14
@@ -118,8 +187,9 @@ sound = A soft kick thump: the Gaussian is the smoothest pulse, with no sharp ed
 # beats = 0.5
 # index_max = 12
 
-# More harmonics, but only on bright passages.
+# More harmonics, but only on bright passages, judged by where the highs end.
 # [tune.saw]
+# drive = rolloff
 # curve = 1.5
 # n_max = 40
 
@@ -129,9 +199,9 @@ sound = A soft kick thump: the Gaussian is the smoothest pulse, with no sharp ed
 # gain = 1.5
 # width_max = 24
 
-# Goes chaotic only when the bass is heavy.
+# Goes chaotic on noisy, distorted passages instead of loud ones.
 # [tune.logistic]
-# drive = bass
+# drive = flatness
 # threshold = 0.3
 # r_min = 3.0
 
@@ -144,3 +214,21 @@ sound = A soft kick thump: the Gaussian is the smoothest pulse, with no sharp ed
 # [tune.bell]
 # drive = sub
 # curve = 2
+
+# ----------------------------------------------------------------- profiles
+# Any section name can end in @NAME. Those keys apply only when profile NAME is active
+# (--profile NAME, profile = NAME under [general], or Shift+P in the app) and are merged
+# over the plain section, so a profile only lists what it changes.
+# [tune.808@phonk]
+# gain = 1.6
+# curve = 2.5
+
+# [tempo@phonk]
+# bpm = 140
+
+# [smoothing@chill]
+# attack_ms = 60
+# decay_ms = 700
+
+# [color@chill]
+# theme = chroma

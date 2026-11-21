@@ -15,13 +15,17 @@ from . import synth
 
 
 class RingBuffer:
+    """Thread-safe ring of stereo frames, shape (size, 2)."""
+
     def __init__(self, size: int):
-        self.buf = np.zeros(size, dtype=np.float32)
+        self.buf = np.zeros((size, 2), dtype=np.float32)
         self.pos = 0
         self.lock = threading.Lock()
 
     def write(self, data: np.ndarray) -> None:
         data = np.asarray(data, dtype=np.float32)
+        if data.ndim == 1:
+            data = np.repeat(data[:, None], 2, axis=1)
         n = len(self.buf)
         if len(data) >= n:
             data = data[-n:]
@@ -35,9 +39,27 @@ class RingBuffer:
                 self.buf[: end - n] = data[k:]
             self.pos = end % n
 
-    def latest(self, count: int) -> np.ndarray:
+    def latest_stereo(self, count: int) -> np.ndarray:
         with self.lock:
-            return np.roll(self.buf, -self.pos)[-count:].copy()
+            return np.roll(self.buf, -self.pos, axis=0)[-count:].copy()
+
+    def latest(self, count: int) -> np.ndarray:
+        return self.latest_stereo(count).mean(axis=1)
+
+
+def pcm_to_stereo(raw: bytes, channels: int, fmt: str = "s16le") -> np.ndarray:
+    """Decode interleaved PCM to float frames of shape (n, 2). Mono is duplicated;
+    with more than two channels the first two are kept."""
+    if fmt == "f32le":
+        a = np.frombuffer(raw, dtype="<f4").astype(np.float32)
+    else:
+        a = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+    ch = max(1, channels)
+    usable = len(a) - (len(a) % ch)
+    a = a[:usable].reshape(-1, ch)
+    if ch == 1:
+        return np.repeat(a, 2, axis=1)
+    return a[:, :2].copy()
 
 
 def pcm_to_mono(raw: bytes, channels: int, fmt: str = "s16le") -> np.ndarray:
@@ -69,6 +91,9 @@ class Source:
 
     def latest(self, count: int, t: float | None = None) -> np.ndarray:
         return self.ring.latest(count)
+
+    def latest_stereo(self, count: int, t: float | None = None) -> np.ndarray:
+        return self.ring.latest_stereo(count)
 
 
 class StreamSource(Source):
@@ -102,7 +127,7 @@ class StreamSource(Source):
                 cut = len(data) - (len(data) % frame)
                 leftover = data[cut:]
                 if cut:
-                    self.ring.write(pcm_to_mono(data[:cut], self.channels, self.fmt))
+                    self.ring.write(pcm_to_stereo(data[:cut], self.channels, self.fmt))
         except Exception as exc:  # pragma: no cover - depends on the host
             self.error = f"{self.name}: {exc}"
         self.alive = False
@@ -137,7 +162,7 @@ class DemoSource(Source):
     name = "demo"
 
     def __init__(self, rate=44100, audible=False):
-        super().__init__(rate, 1)
+        super().__init__(rate, 2)
         self.audible = audible
         self.player: subprocess.Popen | None = None
         self.t0 = 0.0
@@ -145,9 +170,9 @@ class DemoSource(Source):
 
     def _open_player(self):
         candidates = [
-            ["pw-play", "--rate", str(self.rate), "--channels", "1", "--format", "s16", "-"],
-            ["paplay", "--raw", f"--rate={self.rate}", "--channels=1", "--format=s16le"],
-            ["aplay", "-q", "-t", "raw", "-f", "S16_LE", "-r", str(self.rate), "-c", "1"],
+            ["pw-play", "--rate", str(self.rate), "--channels", "2", "--format", "s16", "-"],
+            ["paplay", "--raw", f"--rate={self.rate}", "--channels=2", "--format=s16le"],
+            ["aplay", "-q", "-t", "raw", "-f", "S16_LE", "-r", str(self.rate), "-c", "2"],
         ]
         for cmd in candidates:
             if shutil.which(cmd[0]):
@@ -167,11 +192,11 @@ class DemoSource(Source):
         self.t0 = time.monotonic()
         while self.alive:
             t = (n + np.arange(block)) / self.rate
-            y = synth.render(t)
+            y = synth.render(t, stereo=True)
             self.ring.write(y)
             if self.player and self.player.stdin:
                 try:
-                    self.player.stdin.write((y * 32767).astype("<i2").tobytes())
+                    self.player.stdin.write((np.clip(y, -1, 1) * 32767).astype("<i2").tobytes())
                 except (BrokenPipeError, ValueError):
                     self.player = None
             n += block
@@ -194,10 +219,13 @@ class OfflineDemoSource(Source):
 
     name = "demo (offline)"
 
-    def latest(self, count, t=None):
+    def latest_stereo(self, count, t=None):
         t = 0.0 if t is None else t
         times = t - (np.arange(count)[::-1] / self.rate)
-        return synth.render(np.maximum(times, 0.0))
+        return synth.render(np.maximum(times, 0.0), stereo=True)
+
+    def latest(self, count, t=None):
+        return self.latest_stereo(count, t).mean(axis=1)
 
 
 def _pw_record_cmd(rate: int, channels: int, target: str | None) -> list[str]:

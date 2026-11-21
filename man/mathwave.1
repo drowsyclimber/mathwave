@@ -1,4 +1,4 @@
-.TH MATHWAVE 1 "November 2026" "mathwave 0.2.1" "User Commands"
+.TH MATHWAVE 1 "November 2026" "mathwave 0.3.0" "User Commands"
 .SH NAME
 mathwave \- terminal audio visualizer that drives a grid of math functions
 .SH SYNOPSIS
@@ -39,7 +39,7 @@ Comma-separated panel keys, for example 808,reese,tan,spectrum.
 Grid layout.
 .TP
 .BI \-\-theme " NAME"
-phonk, ocean, ember, matrix, mono or wal.
+phonk, ocean, ember, matrix, mono, wal, or chroma (colors follow the note being played).
 .TP
 .BI \-\-fps " N"
 Frames per second (default 60).
@@ -48,10 +48,19 @@ Frames per second (default 60).
 Gain applied after normalization.
 .TP
 .BI \-\-fft\-size " N"
-FFT size: 1024, 2048 (default), 4096 or 8192. Larger sizes separate sub-bass from bass better but react a little later.
+FFT size: 1024, 2048 (default), 4096, 8192 or 16384. Larger sizes separate sub-bass from bass better but react a little later.
+.TP
+.BI \-\-bpm " auto|N"
+Detect the tempo from kicks, or fix it at N beats per minute.
+.TP
+.BI \-\-profile " NAME"
+Activate a config profile: sections named like [tune.808@NAME] are merged over the plain ones.
 .TP
 .BI \-\-focus " N"
 Start with panel N full screen.
+.TP
+.B \-\-meters
+Start in the live meter view.
 .TP
 .B \-\-formulas
 Print every panel's formula, drive signal, tuning and sound, then exit.
@@ -59,8 +68,14 @@ Print every panel's formula, drive signal, tuning and sound, then exit.
 .BI \-\-list\-knobs " [PANEL]"
 List the keys a [tune.PANEL] section accepts, with defaults, for every panel or one.
 .TP
+.B \-\-list\-features
+List every band (built-in, [bands] and inline) and feature a drive can use, then exit.
+.TP
+.B \-\-keys
+List the keyboard controls and exit.
+.TP
 .BI \-\-render\-wav " PATH"
-Write the demo track to a WAV file and exit.
+Write the demo track to a stereo WAV file and exit.
 .TP
 .BI \-\-dump " FRAMES"
 Headless mode: simulate the demo and print the last frame (see \-\-size, \-\-at).
@@ -72,12 +87,21 @@ Config file. Default: $XDG_CONFIG_HOME/mathwave/config.
 .B 1\-9, 0
 Show that panel full screen with its formula, sound and drive (0 is panel 10). Press the same key again or g to return to the grid.
 .TP
+.B m
+Toggle the meter view: every band and feature as a live bar with its value, dB, Hz or note name.
+.TP
+.B P
+Cycle config profiles (Shift+P).
+.TP
+.B b
+Tap tempo. Tap at least twice on the beat. B returns to the configured or detected tempo.
+.TP
 .B f
 Cycle formula detail: full, formula plus values, hidden.
 .TP
 .B r
-Reload the config file. Panels, tuning, smoothing, gain, theme and layout change at once;
-input, rate, fft_size, dynamic range, noise floor and bar count apply on restart.
+Reload the config file. Everything changes at once, including bands and analysis settings,
+except the audio input itself (method, source, rate, channels, fifo), which applies on restart.
 A config error is shown in the status bar and the running settings are kept.
 .TP
 .B t
@@ -97,8 +121,8 @@ Each panel can have a
 section in the config file. Keys every panel accepts:
 .TP
 .B drive
-What the panel listens to: sub, bass, lowmid, mid, highmid, presence, air, rms, centroid,
-or an expression such as max(sub, 0.7*bass).
+What the panel listens to: a band, a feature (see FEATURES), band(LO, HI) or peak(LO, HI)
+inline, or an expression such as max(sub, 0.7*bass).
 .TP
 .B gain, threshold, curve, min, max
 Shape the level, in that order: multiply, ignore everything below the threshold,
@@ -107,13 +131,45 @@ raise to the curve exponent, then map into min..max.
 .B attack, decay
 Smoothing for this panel only. When set, the panel reads unsmoothed levels, so it can
 move faster or slower than the global [smoothing] values.
+.TP
+.B attack_ms, decay_ms, hold_ms
+The same in milliseconds (time to cover 90% of a change), independent of the frame rate,
+plus a peak hold.
 .PP
 Panels also have knobs for their own constants, for example tau and reveal on the 808
 panel. Run
 .B mathwave \-\-list\-knobs
-to see them. Custom panels can use
+to see them. A knob can be a number or an expression of drives, for example
+.BR "a = 8 + 16*pitch" .
+Custom panels can use
 .B level
 in their params to pick up their tuning.
+.SH FREQUENCIES
+.TP
+.B [bands]
+NAME = LO-HI followed by optional words: peak (loudest bin instead of the mean),
+range=DB, floor=DB, fall=DB_PER_S, fft=N and norm=own|shared. A new name becomes a drive;
+a built-in name (sub, bass, lowmid, mid, highmid, presence, air) is redefined.
+.TP
+.B [analysis]
+fft_size; multires = on with low_fft, high_fft and split_hz; tilt in dB per octave
+around 1 kHz; weighting = none|a; pitch_range = LO-HI.
+.TP
+.B [onsets]
+kick, snare and hat take ranges joined with +, such as 180-400 + 2000-5000, plus
+sensitivity, refractory_ms and envelope_ms.
+.TP
+.B [tempo]
+bpm = auto|N, multiplier (2 double time, 0.5 half time) and range = LO-HI, the window
+detected tempos fold into.
+.SH FEATURES
+rms, centroid, rolloff, flatness, flux, pitch, note, tonality, kick, snare, hat, phase,
+left, right, side, width and balance, all 0..1. Run
+.B mathwave \-\-list\-features
+for descriptions.
+.SH PROFILES
+Any section name can end in @NAME. Its keys apply only while profile NAME is active
+(\-\-profile, profile under [general], or Shift+P) and are merged over the plain section.
 .SH FILES
 .TP
 .I ~/.config/mathwave/config
@@ -124,6 +180,8 @@ User configuration. An annotated example is installed at
 mathwave
 mathwave \-\-demo \-\-audible
 mathwave \-\-panels 808,dive,reese,tan \-\-layout 2x2
+mathwave \-\-meters \-\-profile phonk
+mathwave \-\-bpm 140 \-\-theme chroma
 mathwave \-i fifo \-\-fifo /tmp/mpd.fifo
 .fi
 .SH SEE ALSO

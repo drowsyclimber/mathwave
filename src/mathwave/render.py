@@ -9,7 +9,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .dsp import BANDS, Features
+import colorsys
+
+from .dsp import BANDS, FEATURE_INFO, Features
 from .panels import Panel
 
 RESET = "\x1b[0m"
@@ -21,6 +23,8 @@ THEMES: dict[str, list[str]] = {
     "matrix": ["#00ff6a", "#00d257", "#00a845"],
     "mono": ["#d8d8d8"],
 }
+# "chroma" is computed per frame from the dominant note; "wal" reads a pywal palette.
+DYNAMIC_THEMES = ["chroma", "wal"]
 
 # Braille dot weights indexed [row 0..3][col 0..1].
 _BRAILLE_W = np.array([[0x01, 0x08], [0x02, 0x10], [0x04, 0x20], [0x40, 0x80]], dtype=np.uint32)
@@ -54,6 +58,19 @@ def wal_colors() -> list[str] | None:
         return [c[f"color{i}"] for i in range(1, 7)]
     except Exception:
         return None
+
+
+def chroma_palette(pc: int, tonality: float, n: int) -> list[tuple[int, int, int]]:
+    """Twelve hues around the color wheel, one per pitch class; panels fan out from it.
+    Tonal music gets saturated colors, noisy music drifts towards pastel."""
+    base = (pc % 12) / 12.0
+    sat = 0.45 + 0.45 * max(0.0, min(1.0, tonality))
+    out = []
+    for i in range(max(n, 1)):
+        h = (base + (i / max(n, 1)) * 0.33) % 1.0
+        r, g, b = colorsys.hsv_to_rgb(h, sat, 1.0)
+        out.append((int(r * 255), int(g * 255), int(b * 255)))
+    return out
 
 
 def theme_colors(name: str, custom: list[str] | None = None) -> list[str]:
@@ -268,8 +285,15 @@ def grid_layout(n: int, cols: int, rows: int, spec: str = "auto", min_w: int = 4
 # ------------------------------------------------------------------ renderer
 
 
-DRIVE_LABEL = {**{k: f"{k} {int(lo)}–{int(hi)} Hz" for k, (lo, hi) in BANDS.items()},
-               "rms": "loudness (RMS)", "centroid": "brightness (spectral centroid)"}
+DRIVE_LABEL = {**{k: f"{k} {int(lo)}–{int(hi)} Hz" for k, (lo, hi) in BANDS.items()}, **FEATURE_INFO}
+
+
+def drive_label(name: str, f: Features | None = None) -> str:
+    """Human label for a drive: band ranges (including custom and inline bands) or a feature."""
+    if f is not None and name in f.band_ranges:
+        lo, hi, mode = f.band_ranges[name]
+        return f"{name} {lo:g}–{hi:g} Hz" + (" (peak)" if mode == "peak" else "")
+    return DRIVE_LABEL.get(name, name)
 
 
 class Renderer:
@@ -279,7 +303,13 @@ class Renderer:
         self.custom_colors = colors
         self.styles = Styles(color_mode)
 
-    def palette(self, n: int):
+    def palette(self, n: int, f: Features | None = None):
+        if self.theme == "chroma" and not self.custom_colors:
+            if f is None:
+                return chroma_palette(0, 0.5, n)
+            # 12 hues x 3 saturation steps keeps the style cache small
+            tonal = round(f.levels.get("tonality", 0.5) * 2) / 2
+            return chroma_palette(f.chroma_pc, tonal, n)
         return gradient(theme_colors(self.theme, self.custom_colors), n)
 
     def draw_panel(self, scr: Screen, rect: Rect, panel: Panel, idx: int, rgb, footer: int, focus: bool, f: Features):
@@ -320,7 +350,7 @@ class Renderer:
         if footer >= 1:
             lines.append((panel.live(), main))
         if focus:
-            lines += [("", sub), ("sound: " + panel.sound, sub), ("drive: " + DRIVE_LABEL.get(panel.drive, panel.drive)
+            lines += [("", sub), ("sound: " + panel.sound, sub), ("drive: " + drive_label(panel.drive, f)
                       + f"   level {panel.level:.2f}", sub)]
             tuned = panel.tuning_summary()
             lines.append(("tuned: " + tuned if tuned else "tuned: defaults (add a [tune." + panel.key + "] section)", sub))
@@ -362,19 +392,94 @@ class Renderer:
             for i, (s, sty) in enumerate(lines):
                 scr.text(sep_r + 1 + i, pc, s, sty, maxw=inner_w)
 
+    # ------------------------------------------------------------ meters
+
+    def meter_rows(self, f: Features) -> list[tuple[str, list[tuple[str, str, float, float, str]]]]:
+        """Groups of (name, description, level, raw, extra) for the meter view."""
+        lv, raw = f.levels, f.raw
+        bands = []
+        for name, (lo, hi, mode) in f.band_ranges.items():
+            desc = f"{lo:g}–{hi:g} Hz" + (" peak" if mode == "peak" else "")
+            db = f.band_db.get(name)
+            bands.append((name, desc, lv.get(name, 0.0), raw.get(name, 0.0), f"{db:5.0f} dB" if db is not None else ""))
+        spectrum = [
+            ("rms", "loudness", lv["rms"], raw["rms"], ""),
+            ("centroid", "brightness", lv["centroid"], raw["centroid"], f"{f.centroid_hz / 1000:4.1f} kHz"),
+            ("rolloff", "85% rolloff", lv["rolloff"], raw["rolloff"], f"{f.rolloff_hz / 1000:4.1f} kHz"),
+            ("flatness", "noisiness", lv["flatness"], raw["flatness"], ""),
+            ("flux", "change", lv["flux"], raw["flux"], ""),
+        ]
+        hit = lambda k: "● hit" if f.onsets.get(k) else ""  # noqa: E731
+        musical = [
+            ("pitch", "bass note", lv["pitch"], raw["pitch"],
+             f"{f.pitch_name} {f.pitch_hz:5.1f} Hz" if f.pitch_hz > 0 else "no note"),
+            ("note", "pitch class", lv["note"], raw["note"], f.note_name),
+            ("tonality", "one note dominates", lv["tonality"], raw["tonality"], ""),
+            ("kick", "trigger", lv["kick"], raw["kick"], hit("kick")),
+            ("snare", "trigger", lv["snare"], raw["snare"], hit("snare")),
+            ("hat", "trigger", lv["hat"], raw["hat"], hit("hat")),
+            ("phase", "beat position", lv["phase"], raw["phase"], f"BPM {f.bpm:.0f} {f.tempo_source}"),
+        ]
+        stereo = [(k, d, lv[k], raw[k], "") for k, d in
+                  (("left", "loudness L"), ("right", "loudness R"), ("side", "L−R loudness"),
+                   ("width", "0 mono · 1 wide"), ("balance", "0 L · 0.5 C · 1 R"))]
+        return [("BANDS", bands), ("SPECTRUM", spectrum), ("MUSICAL", musical), ("STEREO", stereo)]
+
+    def draw_meters(self, scr: Screen, rect: Rect, f: Features, pal) -> None:
+        S = self.styles
+        head = S.get(pal[0], bold=True)
+        sub = S.get((150, 150, 150))
+        txt = S.get((235, 235, 235))
+        groups = self.meter_rows(f)
+        lines: list[tuple] = []
+        for gi, (title, rows) in enumerate(groups):
+            lines.append(("head", title, gi))
+            for row in rows:
+                lines.append(("row", row, gi))
+        usable = rect.h - 2
+        ncols = max(1, -(-len(lines) // max(1, usable)))
+        while ncols > 1 and rect.w // ncols < 58:
+            ncols -= 1
+        colw = rect.w // ncols
+        per = -(-len(lines) // ncols)
+        bar_w = max(8, min(30, colw - 52))
+        scr.text(rect.r, rect.c + 1, "meters · live level (bar), smoothed and raw values · m to go back",
+                 sub, maxw=rect.w - 2)
+        for i, item in enumerate(lines):
+            col, r = divmod(i, per)
+            rr = rect.r + 1 + r
+            if rr >= rect.r + rect.h:
+                break
+            c0 = rect.c + 1 + col * colw
+            kind, data, gi = item
+            color = pal[min(len(pal) - 1, gi * max(1, len(pal) // 4))]
+            if kind == "head":
+                scr.text(rr, c0, data, head)
+                continue
+            name, desc, level, raw, extra = data
+            fill = int(round(max(0.0, min(1.0, level)) * bar_w))
+            scr.text(rr, c0, f"{name[:10]:10s}", txt)
+            scr.text(rr, c0 + 11, "█" * fill, S.get(color))
+            scr.text(rr, c0 + 11 + fill, "░" * (bar_w - fill), S.get(color, dim=True))
+            scr.text(rr, c0 + 12 + bar_w, f"{level:4.2f} {raw:4.2f}", txt)
+            scr.text(rr, c0 + 23 + bar_w, f"{extra:16s} {desc}", sub, maxw=max(0, colw - 24 - bar_w))
+
     def render(self, panels: list[Panel], f: Features, cols: int, rows: int, *, layout: str = "auto",
-               footer: int = 2, focus: int | None = None, status: str = "", hints: bool = True) -> list[str]:
+               footer: int = 2, focus: int | None = None, status: str = "", hints: bool = True,
+               meters: bool = False) -> list[str]:
         scr = Screen(cols, rows)
         S = self.styles
-        pal = self.palette(len(panels))
+        pal = self.palette(len(panels), f)
         top = 1 if rows > 10 else 0
         if top:
             left = f" mathwave · {status}"
-            right = "1-9,0 focus · g grid · f formulas · r reload · t theme · +/- gain · q quit " if hints else ""
+            right = "1-9,0 focus · m meters · r reload · P profile · b tap · t theme · q quit " if hints else ""
             scr.text(0, 0, left, S.get(pal[0], bold=True), maxw=cols)
             if right and len(left) + len(right) + 2 < cols:
                 scr.text(0, cols - len(right), right, S.get((130, 130, 130)))
-        if focus is not None and 0 <= focus < len(panels):
+        if meters:
+            self.draw_meters(scr, Rect(top, 0, rows - top, cols), f, pal)
+        elif focus is not None and 0 <= focus < len(panels):
             self.draw_panel(scr, Rect(top, 0, rows - top, cols), panels[focus], focus, pal[focus], max(footer, 2), True, f)
         else:
             rects = grid_layout(len(panels), cols, rows - top, layout)

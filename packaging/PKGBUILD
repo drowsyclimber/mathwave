@@ -6,7 +6,7 @@
 # the one to use while hacking on mathwave. PKGBUILD.aur builds a tagged release
 # from GitHub, and PKGBUILD-git builds the latest commit on main.
 pkgname=mathwave
-pkgver=0.2.1
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="Cava-style terminal audio visualizer that drives a grid of math functions and prints their formulas"
 arch=('any')
