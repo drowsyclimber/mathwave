@@ -11,6 +11,7 @@ import numpy as np
 
 import colorsys
 
+from .controls import Hit, fmt
 from .dsp import BANDS, FEATURE_INFO, Features
 from .panels import Panel
 
@@ -296,12 +297,181 @@ def drive_label(name: str, f: Features | None = None) -> str:
     return DRIVE_LABEL.get(name, name)
 
 
+def _wrap(text: str, width: int, lines: int) -> list[str]:
+    """Word-wrap into at most `lines` lines of `width`, ending with … if it still does not fit."""
+    words, out, cur = text.split(), [], ""
+    for wd in words:
+        if not cur:
+            cur = wd
+        elif len(cur) + 1 + len(wd) <= width:
+            cur += " " + wd
+        else:
+            out.append(cur)
+            cur = wd
+    if cur:
+        out.append(cur)
+    if len(out) > lines:
+        out = out[:lines]
+        out[-1] = out[-1][: max(0, width - 1)] + "…"
+    return [line[:width] for line in out]
+
+
+HINTS = "1-9,0 focus · k tune · c controls · m meters · r reload · P profile · b tap · t theme · q quit "
+
+
 class Renderer:
     def __init__(self, theme: str = "phonk", colors: list[str] | None = None, color_mode: str = "truecolor"):
         self.color_mode = color_mode
         self.theme = theme
         self.custom_colors = colors
         self.styles = Styles(color_mode)
+        self.hits: list[Hit] = []  # clickable slider bars from the last render
+
+    # ------------------------------------------------------------ sliders
+
+    def slider_row(self, scr: Screen, r: int, c: int, w: int, rgb, name: str, frac: float | None, value: str,
+                   selected: bool, changed: bool, hit: tuple[str, str] | None, name_w: int = 12, value_w: int = 9) -> None:
+        """One row: '▸ name ━━━━━●───── value'. frac None draws '◂ value ▸' (a choice, no bar)."""
+        S = self.styles
+        if w < 12 or r < 0 or r >= scr.rows:
+            return
+        txt = S.get((235, 235, 235), bold=selected)
+        dimtxt = S.get((150, 150, 150))
+        accent = S.get(rgb, bold=True)
+        name_w = min(name_w, max(4, w // 3))
+        scr.text(r, c, "▸" if selected else " ", accent)
+        scr.text(r, c + 2, f"{name[:name_w]:{name_w}s}", txt if selected or changed else dimtxt)
+        bc = c + 3 + name_w
+        if frac is None:
+            room = w - (bc - c)
+            label = f"◂ {value} ▸" if selected else f"  {value}"
+            scr.text(r, bc, label, accent if changed or selected else dimtxt, maxw=room)
+            if hit:
+                self.hits.append(Hit(hit[0], hit[1], r, bc, bc + room - 1, (c, c + w - 1)))
+            return
+        value_w = min(value_w, max(4, w - (bc - c) - 6))
+        bar_w = max(4, w - (bc - c) - value_w - 1)
+        frac = max(0.0, min(1.0, frac))
+        knob = min(bar_w - 1, int(round(frac * (bar_w - 1))))
+        scr.text(r, bc, "━" * knob, S.get(rgb, bold=selected))
+        scr.text(r, bc + knob, "●", S.get(rgb, bold=True) if selected else S.get(rgb))
+        scr.text(r, bc + knob + 1, "─" * (bar_w - knob - 1), S.get(rgb, dim=True))
+        scr.text(r, bc + bar_w + 1, f"{value[:value_w]:>{value_w}s}", accent if changed else txt if selected else dimtxt)
+        if hit:
+            self.hits.append(Hit(hit[0], hit[1], r, bc, bc + bar_w - 1, (c, c + w - 1)))
+
+    def draw_slider_list(self, scr: Screen, rect: Rect, bank, rgb, usage: dict | None, full: bool) -> None:
+        S = self.styles
+        sub = S.get((150, 150, 150))
+        if bank is None or not bank.specs:
+            help_lines = [
+                "No sliders yet. Add some to the config, then press r:",
+                "",
+                "  [slider.punch]",
+                "  range = 0-10",
+                "  default = 5",
+                "",
+                "Then read it anywhere a drive works, for example",
+                "  [tune.808]",
+                "  gain = 0.5 + punch/5",
+            ]
+            for i, line in enumerate(help_lines[: rect.h]):
+                scr.text(rect.r + i, rect.c + 1, line, sub, maxw=rect.w - 2)
+            return
+        names = bank.names
+        per = 2 if full else 1
+        visible = max(1, rect.h // per)
+        sel = names.index(bank.current())
+        first = 0 if len(names) <= visible else min(max(0, sel - visible + 1), len(names) - visible)
+        if sel < first:
+            first = sel
+        for i, name in enumerate(names[first:first + visible]):
+            spec = bank.specs[name]
+            r = rect.r + i * per
+            val = fmt(bank.values[name], spec.step)
+            changed = abs(bank.values[name] - spec.default) > 1e-9
+            self.slider_row(scr, r, rect.c, rect.w, rgb, name, bank.norm(name), val, name == bank.current(),
+                            changed, ("slider", name), name_w=12 if full else 10, value_w=8 if full else 6)
+            if full:
+                used = (usage or {}).get(name) or []
+                info = [spec.label] if spec.label else []
+                info.append(f"{spec.lo:g} to {spec.hi:g}, step {spec.step:g}, default {spec.default:g}")
+                info.append("used by " + ", ".join(used) if used else f"not used yet: try drive = {name}/{spec.hi:g}")
+                scr.text(r + 1, rect.c + 15, " · ".join(info), sub, maxw=rect.w - 16)
+
+    def draw_controls(self, scr: Screen, rect: Rect, bank, usage, pal) -> None:
+        S = self.styles
+        sub = S.get((150, 150, 150))
+        head = "controls · ↑↓ pick · ←→ move (Shift or [ ] for big steps, or drag with the mouse) · d default · c back"
+        scr.text(rect.r, rect.c + 1, head, sub, maxw=rect.w - 2)
+        width = min(rect.w - 2, 110)
+        self.draw_slider_list(scr, Rect(rect.r + 2, rect.c + 1, rect.h - 2, width), bank, pal[0], usage, True)
+
+    def draw_tune(self, scr: Screen, rect: Rect, session, rgb) -> None:
+        S = self.styles
+        border = S.get(rgb, dim=True)
+        title = S.get(rgb, bold=True)
+        sub = S.get((150, 150, 150))
+        r0, c0, h, w = rect.r, rect.c, rect.h, rect.w
+        if h < 10 or w < 30:
+            return
+        scr.text(r0, c0, "╭" + "─" * (w - 2) + "╮", border)
+        for rr in range(r0 + 1, r0 + h - 1):
+            scr.text(rr, c0, "│" + " " * (w - 2) + "│", border)
+        scr.text(r0 + h - 1, c0, "╰" + "─" * (w - 2) + "╯", border)
+        label = f" tune · {session.panel.key} " + ("· unsaved " if session.dirty else "")
+        scr.text(r0, c0 + 2, label, title, maxw=w - 4)
+
+        groups = {"drive": "", "gain": "level", "attack_ms": "smoothing"}
+        rows: list[tuple] = []
+        for i, p in enumerate(session.params):
+            if p.kind == "knob" and (i == 0 or session.params[i - 1].kind != "knob"):
+                rows.append(("head", "formula"))
+            elif p.name in groups and groups[p.name]:
+                rows.append(("head", groups[p.name]))
+            rows.append(("param", i))
+        foot = 6
+        visible = max(1, h - 2 - foot)
+        sel_row = next(j for j, row in enumerate(rows) if row == ("param", session.selected))
+        first = session.offset
+        if sel_row < first:
+            first = max(0, sel_row - 1)
+        elif sel_row >= first + visible:
+            first = sel_row - visible + 1
+        session.offset = first
+        inner = Rect(r0 + 1, c0 + 2, visible, w - 4)
+        for j, row in enumerate(rows[first:first + visible]):
+            r = inner.r + j
+            if row[0] == "head":
+                scr.text(r, inner.c + 2, row[1], sub)
+                continue
+            p = session.params[row[1]]
+            selected = row[1] == session.selected
+            expr = session.expression(p)
+            frac = None if p.kind == "drive" or expr is not None else session.norm(p)
+            self.slider_row(scr, r, inner.c, inner.w, rgb, p.name, frac, session.text(p), selected,
+                            session.is_set(p), ("tune", p.name), value_w=12)
+        if first > 0:
+            scr.text(inner.r, c0 + w - 1, "▴", title)
+        if first + visible < len(rows):
+            scr.text(inner.r + visible - 1, c0 + w - 1, "▾", title)
+        p = session.current()
+        fr = r0 + h - 1 - foot
+        scr.text(fr, c0 + 1, "┄" * (w - 2), border)
+        desc = p.desc
+        if p.kind == "drive":
+            desc += f" (default {session.panel.default_drive})"
+        elif session.expression(p) is not None:
+            desc += "; an expression, ←→ turns it into a number"
+        elif p.default is not None:
+            desc += f" (default {fmt(p.default, p.step)})"
+        else:
+            desc += " (default: the global [smoothing] value)"
+        for i, line in enumerate(_wrap(desc, w - 4, 2)):
+            scr.text(fr + 1 + i, c0 + 2, line, S.get((200, 200, 200)))
+        scr.text(fr + 3, c0 + 2, "w writes [" + session.section_name + "]", sub, maxw=w - 4)
+        scr.text(fr + 4, c0 + 2, "↑↓ pick · ←→ move · Shift or [ ] ×10", sub, maxw=w - 4)
+        scr.text(fr + 5, c0 + 2, "d default · u undo · w write · k close", sub, maxw=w - 4)
 
     def palette(self, n: int, f: Features | None = None):
         if self.theme == "chroma" and not self.custom_colors:
@@ -334,7 +504,7 @@ class Renderer:
         label = f" {idx + 1} {panel.title} "
         scr.text(r0, c0 + 2, label, title, maxw=w - 4 - (meter_w + 3 if meter_w else 0))
         if meter_w:
-            filled = int(round(panel.level * meter_w))
+            filled = int(round(max(0.0, min(1.0, panel.level)) * meter_w))
             mc = c0 + w - 3 - meter_w
             scr.text(r0, mc - 1, " ", border)
             scr.text(r0, mc, "█" * filled, main)
@@ -362,11 +532,16 @@ class Renderer:
             return
 
         pr, pc, pw = r0 + 1, c0 + 2, inner_w
+        if getattr(panel, "bank", False) is not False:  # the controls panel: sliders instead of a plot
+            self.draw_slider_list(scr, Rect(pr, pc, plot_h, pw), panel.bank, rgb, None, False)
+            plot_h_used = plot_h
+        else:
+            plot_h_used = 0
         gh, gw = plot_h * 4, pw * 2
         x = np.linspace(panel.domain[0], panel.domain[1], gw)
         g_main = np.zeros((gh, gw), dtype=bool)
         g_aux = np.zeros((gh, gw), dtype=bool)
-        for layer in panel.layers(x):
+        for layer in ([] if plot_h_used else panel.layers(x)):
             kind, val, style = layer
             g = g_main if style == "main" else g_aux
             if kind == "curve":
@@ -379,12 +554,13 @@ class Renderer:
                 plot_points(g, val, panel.yrange)
             elif kind == "bars":
                 plot_bars(g, val)
-        cm, ca = braille_codes(g_main), braille_codes(g_aux)
-        both = cm | ca
-        ch = np.where(both > 0, 0x2800 + both, 32).astype(np.uint32)
-        st = np.where(cm > 0, main, np.where(ca > 0, aux, 0)).astype(np.uint16)
-        scr.ch[pr : pr + plot_h, pc : pc + pw] = ch
-        scr.st[pr : pr + plot_h, pc : pc + pw] = st
+        if not plot_h_used:
+            cm, ca = braille_codes(g_main), braille_codes(g_aux)
+            both = cm | ca
+            ch = np.where(both > 0, 0x2800 + both, 32).astype(np.uint32)
+            st = np.where(cm > 0, main, np.where(ca > 0, aux, 0)).astype(np.uint16)
+            scr.ch[pr : pr + plot_h, pc : pc + pw] = ch
+            scr.st[pr : pr + plot_h, pc : pc + pw] = st
 
         if lines:
             sep_r = pr + plot_h
@@ -425,12 +601,15 @@ class Renderer:
                    ("width", "0 mono · 1 wide"), ("balance", "0 L · 0.5 C · 1 R"))]
         return [("BANDS", bands), ("SPECTRUM", spectrum), ("MUSICAL", musical), ("STEREO", stereo)]
 
-    def draw_meters(self, scr: Screen, rect: Rect, f: Features, pal) -> None:
+    def draw_meters(self, scr: Screen, rect: Rect, f: Features, pal, bank=None) -> None:
         S = self.styles
         head = S.get(pal[0], bold=True)
         sub = S.get((150, 150, 150))
         txt = S.get((235, 235, 235))
         groups = self.meter_rows(f)
+        if bank is not None and bank.specs:
+            groups.append(("SLIDERS", [(n, bank.specs[n].label or f"{bank.specs[n].lo:g} to {bank.specs[n].hi:g}",
+                                        bank.norm(n), bank.norm(n), f"{bank.values[n]:g}") for n in bank.names]))
         lines: list[tuple] = []
         for gi, (title, rows) in enumerate(groups):
             lines.append(("head", title, gi))
@@ -452,7 +631,7 @@ class Renderer:
                 break
             c0 = rect.c + 1 + col * colw
             kind, data, gi = item
-            color = pal[min(len(pal) - 1, gi * max(1, len(pal) // 4))]
+            color = pal[min(len(pal) - 1, gi * max(1, len(pal) // max(4, len(groups))))]
             if kind == "head":
                 scr.text(rr, c0, data, head)
                 continue
@@ -466,21 +645,38 @@ class Renderer:
 
     def render(self, panels: list[Panel], f: Features, cols: int, rows: int, *, layout: str = "auto",
                footer: int = 2, focus: int | None = None, status: str = "", hints: bool = True,
-               meters: bool = False) -> list[str]:
+               meters: bool = False, bank=None, tune=None, controls: bool = False,
+               usage: dict | None = None) -> list[str]:
+        """tune: a controls.TuneSession shown beside the focused panel. controls: the
+        full-screen slider view. bank: the SliderBank (for that view and the meters)."""
+        self.hits = []
         scr = Screen(cols, rows)
         S = self.styles
         pal = self.palette(len(panels), f)
         top = 1 if rows > 10 else 0
         if top:
             left = f" mathwave · {status}"
-            right = "1-9,0 focus · m meters · r reload · P profile · b tap · t theme · q quit " if hints else ""
+            right = HINTS if hints else ""
             scr.text(0, 0, left, S.get(pal[0], bold=True), maxw=cols)
             if right and len(left) + len(right) + 2 < cols:
                 scr.text(0, cols - len(right), right, S.get((130, 130, 130)))
-        if meters:
-            self.draw_meters(scr, Rect(top, 0, rows - top, cols), f, pal)
+        if controls:
+            self.draw_controls(scr, Rect(top, 0, rows - top, cols), bank, usage, pal)
+        elif meters:
+            self.draw_meters(scr, Rect(top, 0, rows - top, cols), f, pal, bank)
         elif focus is not None and 0 <= focus < len(panels):
-            self.draw_panel(scr, Rect(top, 0, rows - top, cols), panels[focus], focus, pal[focus], max(footer, 2), True, f)
+            area = Rect(top, 0, rows - top, cols)
+            if tune is not None:
+                if cols >= 100:
+                    tw = min(62, max(44, cols // 3))
+                    side = Rect(top, cols - tw, rows - top, tw)
+                    area = Rect(top, 0, rows - top, cols - tw)
+                else:
+                    th = max(10, (rows - top) // 2)
+                    side = Rect(rows - th, 0, th, cols)
+                    area = Rect(top, 0, rows - top - th, cols)
+                self.draw_tune(scr, side, tune, pal[focus])
+            self.draw_panel(scr, area, panels[focus], focus, pal[focus], max(footer, 2), True, f)
         else:
             rects = grid_layout(len(panels), cols, rows - top, layout)
             if rects is None:

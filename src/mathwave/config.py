@@ -14,6 +14,7 @@ import re
 from dataclasses import dataclass, field
 
 from .dsp import BANDS, FEATURES, VALID_FFT, AnalysisSettings, BandSpec, Smoothing, drive_names
+from .controls import SliderSpec, parse_slider
 from .panels import _CONSTS, _FUNCS, DEFAULT_ORDER, ExprPanel
 
 
@@ -69,17 +70,21 @@ class Config:
     bpm: float | None = None
     bpm_multiplier: float = 1.0
     bpm_range: tuple = (70.0, 180.0)
+    # manual controls
+    sliders: dict[str, SliderSpec] = field(default_factory=dict)
+    mouse: bool = True
     # panels and profiles
     custom: dict[str, ExprPanel] = field(default_factory=dict)
     tune: dict[str, dict[str, str]] = field(default_factory=dict)
+    tune_base: dict[str, dict[str, str]] = field(default_factory=dict)  # [tune.*] without any profile
     profile: str | None = None
     profiles: list[str] = field(default_factory=list)
     path: str | None = None
 
     @property
     def names(self) -> set[str]:
-        """Every drive name available to expressions."""
-        return drive_names({k: v for k, v in self.bands.items() if k not in BANDS})
+        """Every drive name available to expressions: bands, features and sliders."""
+        return drive_names({k: v for k, v in self.bands.items() if k not in BANDS}) | set(self.sliders)
 
     @property
     def smoothing(self) -> Smoothing:
@@ -259,11 +264,14 @@ def load(path: str | None = None, profile: str | None = None) -> Config:
         msg = " ".join(str(exc).split())
         raise SystemExit(f"mathwave: config error: {msg}")
     cfg.path = path
+    cfg.tune_base = {sec.split(".", 1)[1].strip(): {k: v for k, v in cp[sec].items()}
+                     for sec in cp.sections() if sec.startswith("tune.") and "@" not in sec}
     cfg.profile, cfg.profiles = _apply_profile(cp, profile)
     sec = lambda name: cp[name] if cp.has_section(name) else {}  # noqa: E731
     try:
         _read_values(cfg, sec("general"), sec("input"), sec("color"), sec("smoothing"))
         _read_analysis(cfg, sec("analysis"), sec("bands"), sec("onsets"), sec("tempo"))
+        _read_sliders(cfg, cp)
     except ValueError as exc:
         raise SystemExit(f"mathwave: config error in {path}: {exc}")
     _read_panels(cfg, cp, path)
@@ -278,6 +286,8 @@ def _read_values(cfg: Config, g, i, c, s) -> None:
     cfg.layout = g.get("layout", cfg.layout) or "auto"
     cfg.formulas = int(g.get("formulas", cfg.formulas))
     cfg.bars = int(g.get("bars", cfg.bars))
+    if g.get("mouse"):
+        cfg.mouse = _bool(g["mouse"], "mouse")
 
     cfg.method = i.get("method", cfg.method) or "auto"
     cfg.source = i.get("source", cfg.source) or "auto"
@@ -348,6 +358,44 @@ def _read_analysis(cfg: Config, a, b, o, t) -> None:
         cfg.bpm_range = parse_range(t["range"], "range")
 
 
+def _read_sliders(cfg: Config, cp: configparser.ConfigParser) -> None:
+    reserved = _RESERVED | set(BANDS) | set(cfg.bands) | {"controls"}
+    for sec in cp.sections():
+        if sec.startswith("slider."):
+            name = sec.split(".", 1)[1].strip()
+            cfg.sliders[name] = parse_slider(name, dict(cp[sec]), reserved)
+
+
+_KNOB = re.compile(r"^\s*([a-z_][a-z0-9_]*)\s*=\s*(-?\d+(?:\.\d+)?)\s*"
+                   r"(?:\(\s*(-?\d+(?:\.\d+)?)\s*(?:\.\.|to|-)\s*(-?\d+(?:\.\d+)?)\s*(?:,\s*(\d+(?:\.\d+)?)\s*)?\))?\s*$")
+
+
+def _knobs(text: str, taken: set[str]) -> dict[str, tuple[float, float, float, float]]:
+    """'height = 0.85 (0..1), width = 0.3 (0.05..1, 0.01)' -> {name: (default, lo, hi, step)}."""
+    out = {}
+    for part in _split_top(text):
+        if not part.strip():
+            continue
+        m = _KNOB.match(part)
+        if not m and _KNOB.match(part.lower()):
+            raise ValueError(f"knobs entry '{part.strip()}': knob names are lowercase (they are keys in [tune.<panel>])")
+        if not m:
+            raise ValueError(f"knobs entry '{part.strip()}': use name = default (lo..hi), e.g. width = 0.3 (0.05..1)")
+        name, default = m.group(1), float(m.group(2))
+        if name in taken or name in _RESERVED:
+            raise ValueError(f"knob name '{name}' is already a drive, param or function name")
+        if m.group(3) is not None:
+            lo, hi = float(m.group(3)), float(m.group(4))
+        else:
+            hi = max(1.0, abs(default) * 2.0)
+            lo = 0.0 if default >= 0 else -hi
+        if not lo < hi or not lo <= default <= hi:
+            raise ValueError(f"knob '{name}': needs lo < hi and the default inside the range")
+        step = float(m.group(5)) if m.group(5) else (hi - lo) / 100.0
+        out[name] = (default, lo, hi, step)
+    return out
+
+
 def _read_panels(cfg: Config, cp: configparser.ConfigParser, path: str) -> None:
     names = cfg.names
     for name in cp.sections():
@@ -359,17 +407,22 @@ def _read_panels(cfg: Config, cp: configparser.ConfigParser, path: str) -> None:
             continue
         key = name.split(".", 1)[1]
         sec = cp[name]
+        if key == "controls":
+            raise SystemExit(f"mathwave: [{name}] in {path}: 'controls' is the built-in slider panel; pick another key")
         try:
+            params = _params(sec.get("params", ""))
+            knobs = _knobs(sec.get("knobs", ""), names | set(params))
             cfg.custom[key] = ExprPanel(
                 key,
                 sec["expr"],
-                _params(sec.get("params", "")),
+                params,
                 title=sec.get("title"),
                 domain=_pairs(sec.get("domain", "-1, 1")),
                 yrange=_pairs(sec.get("yrange", "-1.1, 1.1")),
                 drive=sec.get("drive", "rms"),
                 sound=sec.get("sound"),
                 names=names,
+                knobs=knobs,
             )
         except KeyError as exc:
             raise SystemExit(f"mathwave: [{name}] in {path} is missing {exc}")

@@ -48,6 +48,8 @@ mathwave --list-features      # every band and feature you can drive a panel wit
 mathwave --meters             # start in the live meter view
 mathwave --profile phonk      # start with a config profile
 mathwave --bpm 140            # fix the tempo instead of detecting it
+mathwave --focus 7 --tune     # open the sinc panel in tune mode
+mathwave --set punch=8        # start a [slider.*] at a value
 mathwave --render-wav demo.wav  # the demo track as a stereo WAV
 mathwave -i fifo --fifo /tmp/mpd.fifo
 ```
@@ -57,6 +59,12 @@ Keys (also `mathwave --keys`):
 | Key | Does |
 |---|---|
 | `1`–`9`, `0` | full-screen a panel (shows the sound, drive and tuning too); `0` is panel 10; the same key again or `g` returns |
+| `k` | tune mode: the focused panel's settings as sliders (from the grid it opens panel 1) |
+| `c` | full-screen controls: your `[slider.*]` values |
+| `↑` `↓`, Tab | pick a slider |
+| `←` `→` | move it; Shift+`←` `→` or `[` `]` for ten steps; Home and End for the ends |
+| mouse | click or drag a slider bar, or scroll the wheel over one |
+| `d` / `u` / `w` | slider back to its default / undo all tuning / write tuning to the config |
 | `m` | live meter view of every band and feature, with dB, Hz and note names |
 | `r` | reload the config |
 | `P` | cycle config profiles (Shift+P) |
@@ -65,7 +73,8 @@ Keys (also `mathwave --keys`):
 | `t` | next theme |
 | `+` / `-` | gain |
 | `p`, space | pause |
-| `q`, Esc | quit |
+| Esc | close tune mode, controls or meters; quit from the grid |
+| `q` | quit |
 
 Themes: `phonk`, `ocean`, `ember`, `matrix`, `mono`, `wal`, which reads `~/.cache/wal/colors.json` so it follows a pywal-based Hyprland rice, and `chroma`, which recolors everything by the note that is playing (C is red, and the hue goes round the color wheel to B).
 
@@ -124,6 +133,47 @@ a = 8 + 16*pitch     # the base frequency follows the bass note
 ```
 
 Expressions are checked before they run: only arithmetic, numeric constants, drive names (`mathwave --list-features`), `t`, `beat`, `band()`, `peak()` and a fixed list of math functions are allowed.
+
+## Manual controls
+
+Every panel can be tuned with sliders instead of by editing the config. Focus a panel (`1`–`9`, `0`) and press `k`: its drive, level shaping, smoothing and every constant in its formula appear beside it as sliders. Changes show up on the plot immediately. Press `w` to write them into the panel's `[tune.<panel>]` section. Only values that differ from the defaults get written, existing comments stay where they are, and the previous file is kept as `config.bak`. With a profile active, `w` writes to `[tune.<panel>@<profile>]` and only stores what differs from the plain section.
+
+![mathwave tune mode](docs/mathwave-tune.png)
+
+The drive row cycles through every band, feature and slider. `d` puts the selected value back to its default, and `u` undoes everything since the last write or reload. A value that is an expression, such as `a = 8 + 16*pitch`, shows its formula; moving it turns it into a plain number.
+
+### Your own sliders
+
+A `[slider.NAME]` section adds a control with its own range. Its value is a name you can use anywhere: in a drive, a knob, a shaping key or a custom panel's params.
+
+```ini
+[slider.punch]
+range = 0-10
+default = 5
+label = kick weight
+
+[tune.808]
+gain = 0.5 + punch/5        # shaping keys take expressions too
+
+[tune.logistic]
+drive = chaos/10            # sliders keep their own range, so divide to get 0..1
+```
+
+Add `controls` to `panels` to put the sliders in the grid, or press `c` for a full-screen view that also shows which panels read each one. `--set punch=8` sets one at startup. Slider positions are saved per profile in `~/.local/state/mathwave/sliders.json`, so they come back next time. `m` lists them alongside the other meters.
+
+### Knobs for custom panels
+
+Custom panels can declare their own knobs, which their params can read, `[tune.<panel>]` can set and tune mode shows as sliders:
+
+```ini
+[panel.bell]
+expr = A*exp(-x^2/(2*s^2))
+params = A = 0.15 + height*level, s = 0.06 + spread*level
+knobs = height = 0.85 (0..1), spread = 0.3 (0.05..1)
+drive = bass
+```
+
+The mouse works in most terminals. Shift+drag still selects text, and `mouse = off` under `[general]` (or `--no-mouse`) leaves the mouse alone.
 
 ## Frequencies and features
 

@@ -190,6 +190,18 @@ class Tuning:
         return " ".join(parts)
 
 
+# Shaping keys that may also be expressions, with the range their value is held to.
+SHAPE_KEYS = {"gain": (1e-3, 100.0), "threshold": (0.0, 0.99), "curve": (0.05, 20.0), "min": (0.0, 1.0), "max": (0.0, 1.0)}
+SHAPE_ATTR = {"min": "lo", "max": "hi"}
+
+
+def _maybe_float(val: str) -> float | None:
+    try:
+        return float(val)
+    except ValueError:
+        return None
+
+
 def _float(key: str, val: str, lo: float | None = None, hi: float | None = None, lo_open=False, hi_open=False) -> float:
     try:
         v = float(val)
@@ -228,6 +240,8 @@ class Panel:
     # name -> (default, description). Overridable from [tune.<key>].
     KNOBS: dict[str, tuple[float, str]] = {}
     INT_KNOBS: set[str] = set()
+    # name -> (lo, hi, step): the slider range tune mode (k) offers for each knob
+    RANGES: dict[str, tuple[float, float, float]] = {}
 
     def __init__(self, names: set[str] | None = None):
         self.p: dict[str, float] = {}
@@ -240,6 +254,9 @@ class Panel:
         self.inline: dict[str, tuple[float, float, str]] = {}
         self.base_smoothing = Smoothing()
         self._follow: Follower | None = None
+        self.section: dict[str, str] = {}
+        self.t_expr: dict[str, object] = {}
+        self.t_src: dict[str, str] = {}
         self.set_drive(self.default_drive)
 
     # -- tuning
@@ -264,11 +281,17 @@ class Panel:
         else:
             self.base_smoothing = Smoothing(attack=global_attack, decay=global_decay)
         t = Tuning()
+        t_expr: dict[str, object] = {}
+        t_src: dict[str, str] = {}
         for raw_key, val in section.items():
             key = raw_key.strip().lower()
             val = val.strip()
             if key == "drive":
                 self.set_drive(val)
+            elif key in SHAPE_KEYS and _maybe_float(val) is None:
+                # gain = 0.5 + punch/5: an expression of drives and sliders, evaluated each frame
+                t_expr[key] = compile_expr(val, self.names, self.inline)
+                t_src[key] = val
             elif key == "gain":
                 t.gain = _float(key, val, 0.0, lo_open=True)
             elif key == "threshold":
@@ -305,12 +328,34 @@ class Panel:
                 hint = f" (did you mean {close[0]}?)" if close else ""
                 raise ValueError(f"unknown key '{key}'{hint}; see mathwave --list-knobs {self.key}")
         self.tune = t
+        self.t_expr, self.t_src = t_expr, t_src
         self._follow = Follower(t.smoothing(self.base_smoothing)) if t.own_smoothing else None
+        self.section = {k.strip().lower(): v.strip() for k, v in section.items()}
+
+    def retune(self, section: dict[str, str]) -> None:
+        """Replace the whole [tune.<key>] section live (tune mode). Unlike configure(),
+        knobs and drive start from their defaults first, and the smoothing state carries
+        over so the panel does not jump."""
+        old = self._follow
+        self.k = {name: v for name, (v, _) in self.KNOBS.items()}
+        self.k_expr, self.k_src = {}, {}
+        self.set_drive(self.default_drive)
+        self.configure(section, self.base_smoothing)
+        if old is not None and self._follow is not None:
+            old.s = self._follow.s
+            self._follow = old
 
     def drive_level(self, f: Features, dt: float = 1 / 60) -> float:
         """The panel's tuned 0..1 level for this frame."""
         own = self._follow is not None
         levels = f.raw if own else f.levels
+        if self.t_expr:
+            env = _with_defaults(f.levels, self.inline)
+            for key, code in self.t_expr.items():
+                v = _eval(code, env)
+                if math.isfinite(v):
+                    lo, hi = SHAPE_KEYS[key]
+                    setattr(self.tune, SHAPE_ATTR.get(key, key), min(hi, max(lo, v)))
         x = float(self.tune.shape(_eval(self._drive_code, _with_defaults(levels, self.inline))))
         return float(self._follow(x, dt)) if own else x
 
@@ -331,9 +376,11 @@ class Panel:
         parts = []
         if self.drive != self.default_drive:
             parts.append(f"drive={self.drive}")
-        s = self.tune.summary()
+        s = " ".join(w for w in self.tune.summary().split()
+                     if w.split("=")[0] not in self.t_src and not (w.startswith("range=") and ({"min", "max"} & set(self.t_src))))
         if s:
             parts.append(s)
+        parts += [f"{k}={v.replace(' ', '')}" for k, v in self.t_src.items()]
         changed = [f"{n}={self.k_src[n].replace(' ', '')}" if n in self.k_src else f"{n}={v:g}"
                    for n, v in self.k.items() if n in self.k_src or v != self.KNOBS[n][0]]
         return " ".join(parts + changed)
@@ -381,6 +428,12 @@ class Exp808(Panel):
         "k_min": (2.0, "decay rate k at level 1 (lower rings longer)"),
         "k_max": (5.0, "decay rate k at level 0"),
         "reveal": (0.35, "seconds to redraw the curve after each kick (0 = no redraw)"),
+    }
+
+    RANGES = {
+        "amp_min": (0.0, 1.0, 0.01), "f0_min": (1.0, 30.0, 0.5), "f0_max": (1.0, 40.0, 0.5),
+        "f1": (0.5, 15.0, 0.25), "tau": (0.02, 1.0, 0.01), "k_min": (0.2, 10.0, 0.1),
+        "k_max": (0.2, 12.0, 0.1), "reveal": (0.0, 1.5, 0.05),
     }
 
     def __init__(self, names=None):
@@ -432,6 +485,9 @@ class DiveBomb(Panel):
         "beats": (2.0, "beats per asymptote sweep cycle"),
     }
 
+    RANGES = {"a_min": (0.005, 0.5, 0.005), "a_max": (0.01, 1.0, 0.01), "sweep": (0.0, 1.0, 0.05),
+              "beats": (0.25, 8.0, 0.25)}
+
     def __init__(self, names=None):
         super().__init__(names)
         self.phase = 0.0
@@ -470,6 +526,9 @@ class Reese(Panel):
         "drift": (6.0, "extra scroll speed at level 1"),
     }
 
+    RANGES = {"a": (2.0, 40.0, 0.5), "detune_min": (0.0, 10.0, 0.1), "detune_max": (0.0, 20.0, 0.1),
+              "amp_min": (0.0, 1.0, 0.01), "drift": (0.0, 20.0, 0.5)}
+
     def __init__(self, names=None):
         super().__init__(names)
         self.phase = 0.0
@@ -507,6 +566,9 @@ class TanScreech(Panel):
         "scroll": (1.5, "extra scroll speed at level 1"),
     }
 
+    RANGES = {"amp_min": (0.0, 1.0, 0.01), "freq_min": (0.5, 20.0, 0.25), "freq_max": (0.5, 30.0, 0.25),
+              "scroll": (0.0, 8.0, 0.1)}
+
     def __init__(self, names=None):
         super().__init__(names)
         self.phi = 0.0
@@ -543,6 +605,9 @@ class FMWobble(Panel):
         "mod": (1.5, "modulator ωm, in cycles across the panel"),
         "beats": (1.0, "beats per φ cycle (0.5 = twice per beat)"),
     }
+
+    RANGES = {"index_min": (0.0, 10.0, 0.1), "index_max": (0.0, 20.0, 0.1), "carrier": (1.0, 15.0, 0.5),
+              "mod": (0.25, 8.0, 0.25), "beats": (0.25, 8.0, 0.25)}
 
     def __init__(self, names=None):
         super().__init__(names)
@@ -582,6 +647,8 @@ class FourierSaw(Panel):
         "speed": (1.2, "scroll speed"),
     }
     INT_KNOBS = {"n_min", "n_max"}
+
+    RANGES = {"n_min": (1.0, 20.0, 1.0), "n_max": (1.0, 80.0, 1.0), "speed": (0.0, 5.0, 0.1)}
 
     def __init__(self, names=None):
         super().__init__(names)
@@ -623,6 +690,7 @@ class Sinc(Panel):
         "width_min": (2.0, "ω at level 0 (higher is narrower)"),
         "width_max": (18.0, "ω at level 1"),
     }
+    RANGES = {"amp_min": (0.0, 1.0, 0.01), "width_min": (0.5, 20.0, 0.5), "width_max": (1.0, 40.0, 0.5)}
 
     def update(self, f, dt):
         super().update(f, dt)
@@ -652,6 +720,8 @@ class Logistic(Panel):
         "steps": (4.0, "iterations added per frame (scroll speed)"),
     }
     INT_KNOBS = {"steps"}
+
+    RANGES = {"r_min": (0.5, 4.0, 0.01), "r_max": (0.5, 4.0, 0.01), "steps": (1.0, 50.0, 1.0)}
 
     def __init__(self, names=None):
         super().__init__(names)
@@ -741,12 +811,19 @@ class ExprPanel(Panel):
     drive = bass
 
     In params, `level` is the panel's tuned level: its drive after any [tune.<key>] shaping.
+
+    knobs = height = 0.85 (0..1), width = 0.3 (0.05..1) declares the panel's own knobs:
+    names its params can use, set from [tune.<key>] and shown as sliders in tune mode.
     """
 
     def __init__(self, key: str, expr: str, params: dict[str, str], title: str | None = None,
                  domain=(-1.0, 1.0), yrange=(-1.1, 1.1), drive: str = "rms", sound: str | None = None,
-                 names: set[str] | None = None):
+                 names: set[str] | None = None, knobs: dict[str, tuple[float, float, float, float]] | None = None):
         self.default_drive = drive
+        knobs = knobs or {}
+        self.KNOBS = {n: (d, f"custom knob, {lo:g} to {hi:g}") for n, (d, lo, hi, _) in knobs.items()}
+        self.RANGES = {n: (lo, hi, st) for n, (_, lo, hi, st) in knobs.items()}
+        self.INT_KNOBS = set()
         super().__init__(names)
         self.key = key
         self.title = title or f"{key} · custom"
@@ -756,13 +833,14 @@ class ExprPanel(Panel):
         self.sound = sound or "User-defined formula from the config file."
         self.domain = tuple(domain)
         self.yrange = tuple(yrange)
-        pnames = self.names | {"t", "beat", "level"}
+        pnames = self.names | {"t", "beat", "level"} | set(knobs)
+        self.param_src = dict(params)
         self.param_code = {k: compile_expr(v, pnames, self.inline) for k, v in params.items()}
         self.code = compile_expr(expr, set(params) | {"x", "t"})
 
     def update(self, f, dt):
         super().update(f, dt)
-        env = _with_defaults(dict(f.levels, t=f.t, beat=f.beat_period, level=self.level), self.inline)
+        env = _with_defaults(dict(f.levels, t=f.t, beat=f.beat_period, level=self.level, **self.k), self.inline)
         self.p = {k: _eval(c, env) for k, c in self.param_code.items()}
         self.t = f.t
 
@@ -776,8 +854,33 @@ class ExprPanel(Panel):
         return [("hline", 0.0, "aux"), ("curve", y, "main")]
 
 
+class Controls(Panel):
+    """Your [slider.*] values as a panel. Add `controls` to panels to put it in the grid."""
+
+    key = "controls"
+    title = "controls · sliders"
+    formula = "s = your [slider.*] values"
+    identity = "↑↓ pick · ←→ move · d default"
+    default_drive = "0"
+    sound = "No formula: these are your hands on the dials. Any drive, knob or param can read them."
+    yrange = (0.0, 1.0)
+
+    def __init__(self, names=None):
+        super().__init__(names)
+        self.bank = None  # set by the app: a controls.SliderBank
+
+    def update(self, f, dt):
+        name = self.bank.current() if self.bank is not None else None
+        self.level = self.bank.norm(name) if name else 0.0
+
+    def live(self):
+        if self.bank is None or not self.bank.specs:
+            return "no sliders: add a [slider.NAME] section"
+        return "  ".join(f"{n}={self.bank.values[n]:g}" for n in self.bank.names)
+
+
 BUILTIN = [Exp808, DiveBomb, Reese, TanScreech, FMWobble, FourierSaw, Sinc, Logistic, Spectrum]
-BY_KEY = {cls.key: cls for cls in BUILTIN}
+BY_KEY = {cls.key: cls for cls in BUILTIN + [Controls]}
 DEFAULT_ORDER = [cls.key for cls in BUILTIN]
 
 
@@ -794,7 +897,7 @@ def make_panels(keys: list[str], custom: dict[str, ExprPanel] | None = None,
     base = smoothing or Smoothing(attack=global_attack, decay=global_decay)
     known = set(BY_KEY) | set(custom)
     for k in tune:
-        if k not in known:
+        if k not in known or k == "controls":
             raise SystemExit(f"mathwave: [tune.{k}] does not match any panel. Panels: {', '.join(DEFAULT_ORDER + list(custom))}")
     out = []
     for k in keys:
@@ -806,7 +909,7 @@ def make_panels(keys: list[str], custom: dict[str, ExprPanel] | None = None,
         elif k in BY_KEY:
             p = BY_KEY[k](names)
         else:
-            raise SystemExit(f"mathwave: unknown panel '{k}'. Built-in panels: {', '.join(DEFAULT_ORDER)}")
+            raise SystemExit(f"mathwave: unknown panel '{k}'. Built-in panels: {', '.join(DEFAULT_ORDER + ['controls'])}")
         try:
             p.configure(tune.get(k, {}), base)
         except (ValueError, SyntaxError) as exc:

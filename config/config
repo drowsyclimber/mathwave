@@ -7,7 +7,8 @@ framerate = 60
 # Gain applied after the automatic level normalization.
 sensitivity = 1.0
 # Panels in display order. Built-ins: 808, dive, reese, tan, fm, saw, sinc, logistic, spectrum
-# Custom panels defined below can be listed here by their key.
+# Custom panels defined below can be listed here by their key, and `controls` adds a
+# panel with your [slider.*] values (see the end of this file).
 panels = 808, dive, reese, tan, fm, saw, sinc, logistic, spectrum, bell
 # auto, or COLSxROWS such as 3x3 or 4x2
 layout = auto
@@ -17,6 +18,9 @@ formulas = 2
 bars = 48
 # Profile to start with (see the end of this file). Shift+P cycles profiles live.
 # profile = phonk
+# The mouse drags sliders in tune mode and the controls view. Shift+drag still
+# selects text in most terminals; set off to leave the mouse alone.
+# mouse = off
 
 [input]
 # auto tries parec (PulseAudio or pipewire-pulse), then pw-record.
@@ -130,6 +134,10 @@ domain = -1, 1
 yrange = -0.05, 1.05
 drive = bass
 sound = A soft kick thump: the Gaussian is the smoothest pulse, with no sharp edges to click.
+# A custom panel can also declare its own knobs, which its params can use, [tune.bell]
+# can set, and tune mode (k) shows as sliders. Lowercase names, default, then the range:
+#   knobs = height = 0.85 (0..1), spread = 0.3 (0.05..1)
+#   params = A = 0.15 + height*level, s = 0.06 + spread*level
 
 # ----------------------------------------------------------------- per-panel tuning
 # Any panel can have a [tune.<panel>] section. Every key is optional.
@@ -149,7 +157,11 @@ sound = A soft kick thump: the Gaussian is the smoothest pulse, with no sharp ed
 #   attack_ms, decay_ms, hold_ms   the same in milliseconds, as in [smoothing]
 # The order is: drive -> gain -> threshold -> curve -> min..max -> smoothing.
 # Each panel also has its own knobs for its formula's constants (shown below with examples).
-# A knob can be a number or an expression of drives, like a = 8 + 16*pitch.
+# A knob can be a number or an expression of drives and sliders, like a = 8 + 16*pitch.
+# gain, threshold, curve, min and max can be expressions too, like gain = 0.5 + punch/5.
+#
+# Easier than editing by hand: focus a panel (1-9, 0), press k for tune mode, move the
+# sliders with the arrow keys or the mouse, and press w to write them into this file.
 # The examples are commented out; remove the leading "# " to use one.
 
 # Kick only, tight and punchy, with a longer pitch drop.
@@ -214,6 +226,27 @@ sound = A soft kick thump: the Gaussian is the smoothest pulse, with no sharp ed
 # [tune.bell]
 # drive = sub
 # curve = 2
+
+# ----------------------------------------------------------------- sliders
+# A [slider.NAME] section adds a manual control with its own range. Its value is a name
+# you can use in any drive, knob, shaping key or custom-panel param. Move sliders on the
+# `controls` panel (add it to panels above) or full screen with c: arrow keys, Shift or
+# [ ] for ten steps, Home and End, or drag with the mouse. Positions are remembered per
+# profile in ~/.local/state/mathwave/sliders.json. Keys: range (default 0-10), default
+# (default: the low end), step (default: a hundredth of the range) and label.
+# Sliders keep their own range, so divide to get 0..1 when you use one as a drive:
+#   [tune.808]
+#   gain = 0.5 + punch/5
+#   [tune.logistic]
+#   drive = chaos/10
+# [slider.punch]
+# range = 0-10
+# default = 5
+# label = kick weight
+
+# [slider.chaos]
+# range = 0-10
+# default = 3
 
 # ----------------------------------------------------------------- profiles
 # Any section name can end in @NAME. Those keys apply only when profile NAME is active
