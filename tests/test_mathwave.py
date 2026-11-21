@@ -225,3 +225,132 @@ def test_fft_size_config_and_sub_separation(tmp_path):
         return float(np.mean(vals))
 
     assert sub_on_line(4096) < 0.7 * sub_on_line(2048)
+
+
+# ---------------------------------------------------------------- per-panel tuning
+
+from mathwave.dsp import Features
+from mathwave.panels import BUILTIN, Exp808, Spectrum, Tuning, make_panels as _mk
+
+
+def feats(**levels):
+    base = {k: 0.0 for k in ("sub", "bass", "lowmid", "mid", "highmid", "presence", "air", "rms", "centroid")}
+    base.update(levels)
+    return Features(levels=dict(base), raw=dict(base))
+
+
+def test_tuning_shape_math():
+    t = Tuning(gain=2.0, threshold=0.5, curve=2.0, lo=0.2, hi=0.8)
+    # 0.3*2=0.6 -> (0.6-0.5)/0.5=0.2 -> 0.04 -> 0.2+0.6*0.04
+    assert t.shape(0.3) == pytest.approx(0.224)
+    assert t.shape(0.1) == pytest.approx(0.2)  # under threshold rests at min
+    assert t.shape(1.0) == pytest.approx(0.8)
+    inv = Tuning(lo=1.0, hi=0.0)
+    assert inv.shape(0.25) == pytest.approx(0.75)
+
+
+def test_drive_override_changes_what_the_panel_hears():
+    default, sub_only = _mk(["808"]), _mk(["808"], tune={"808": {"drive": "sub"}})
+    f = feats(sub=0.1, bass=1.0)
+    default[0].update(f, 1 / 60)
+    sub_only[0].update(f, 1 / 60)
+    assert default[0].level == pytest.approx(0.7)  # max(sub, 0.7*bass)
+    assert sub_only[0].level == pytest.approx(0.1)
+
+
+def test_knobs_override_formula_constants():
+    p = _mk(["808"], tune={"808": {"tau": "0.5", "f1": "1"}})[0]
+    p.update(feats(sub=1.0), 1 / 60)
+    assert p.p["τ"] == 0.5 and p.p["f₁"] == 1.0
+    assert "tau=0.5" in p.tuning_summary() and "f1=1" in p.tuning_summary()
+    saw = _mk(["saw"], tune={"saw": {"n_max": "7.6"}})[0]
+    saw.update(feats(centroid=1.0), 1 / 60)
+    assert saw.p["N"] == 8
+
+
+def test_own_decay_falls_faster_than_global_smoothing():
+    fast = _mk(["sinc"], tune={"sinc": {"decay": "0.5"}})[0]
+    slow = _mk(["sinc"])[0]
+    # global smoothing would hold f.levels high; the panel's own decay reads raw levels.
+    held = Features(levels={**feats().levels, "air": 0.9}, raw={**feats().raw, "air": 1.0})
+    fast.update(held, 1 / 60)
+    for _ in range(3):
+        f = Features(levels={**feats().levels, "air": 0.8}, raw=feats().raw)
+        fast.update(f, 1 / 60)
+        slow.update(f, 1 / 60)
+    assert fast.level == pytest.approx(0.125) and slow.level == pytest.approx(0.8)
+
+
+def test_bad_tune_sections_are_reported():
+    with pytest.raises(SystemExit, match="unknown key 'tua'"):
+        _mk(["808"], tune={"808": {"tua": "1"}})
+    with pytest.raises(SystemExit, match="does not match any panel"):
+        _mk(["808"], tune={"80": {"gain": "2"}})
+    with pytest.raises(SystemExit, match="unknown name 'subb'"):
+        _mk(["808"], tune={"808": {"drive": "subb"}})
+    with pytest.raises(SystemExit, match="must be"):
+        _mk(["808"], tune={"808": {"decay": "1.5"}})
+
+
+def test_every_builtin_has_documented_knobs_and_accepts_common_keys():
+    for cls in BUILTIN:
+        p = _mk([cls.key], tune={cls.key: {"gain": "1.5", "curve": "2", "min": "0.1", "max": "0.9",
+                                         "threshold": "0.1", "attack": "0.5", "decay": "0.8"}})[0]
+        for _ in range(3):
+            p.update(feats(sub=0.7, bass=0.7, lowmid=0.7, mid=0.7, highmid=0.7, presence=0.7, air=0.7,
+                           rms=0.7, centroid=0.7), 1 / 60)
+        assert 0.1 <= p.level <= 0.9
+        p.layers(np.linspace(*p.domain, 80))
+        for name, (default, desc) in cls.KNOBS.items():
+            assert name == name.lower() and desc
+
+
+def test_spectrum_tuning_shapes_bars():
+    p = _mk(["spectrum"], tune={"spectrum": {"threshold": "0.5"}})[0]
+    f = Features(spectrum=np.array([0.2, 0.75, 1.0], dtype=np.float32))
+    p.update(f, 1 / 60)
+    assert p.bars.tolist() == pytest.approx([0.0, 0.5, 1.0])
+
+
+def test_custom_panel_level_uses_its_tuning(tmp_path):
+    cfg_file = tmp_path / "config"
+    cfg_file.write_text(
+        "[general]\npanels = bell\n"
+        "[panel.bell]\nexpr = A*exp(-x^2/(2*s^2))\nparams = A = level, s = 0.2\ndrive = bass\n"
+        "[tune.bell]\ndrive = sub\ncurve = 2\n"
+    )
+    cfg = load(str(cfg_file))
+    bell = _mk(cfg.panels, cfg.custom, cfg.tune)[0]
+    bell.update(feats(sub=0.5, bass=1.0), 1 / 60)
+    assert bell.p["A"] == pytest.approx(0.25)
+
+
+def test_shipped_config_tune_examples_parse():
+    """Every commented [tune.*] example in the shipped config must be valid when uncommented."""
+    path = os.path.join(os.path.dirname(__file__), "..", "config", "config")
+    lines, block = open(path).read().splitlines(), []
+    text = []
+    for line in lines:
+        if line.startswith("# [tune.") or (block and line.startswith("# ") and "=" in line and not line.startswith("# #")):
+            block.append(line[2:])
+        elif block:
+            text += block + [""]
+            block = []
+    assert any(l.startswith("[tune.") for l in text)
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".ini", delete=False) as fh:
+        fh.write("\n".join(text))
+    cfg = load(fh.name)
+    _mk(DEFAULT_ORDER, cfg.custom, cfg.tune)
+    assert set(cfg.tune) >= set(DEFAULT_ORDER)
+
+
+def test_cli_list_knobs():
+    env = dict(os.environ, PYTHONPATH=os.path.join(os.path.dirname(__file__), "..", "src"))
+    out = subprocess.run([sys.executable, "-m", "mathwave", "--list-knobs"], capture_output=True, text=True,
+                         env=env, check=True).stdout
+    for cls in BUILTIN:
+        assert f"[tune.{cls.key}]" in out
+    out = subprocess.run([sys.executable, "-m", "mathwave", "--list-knobs", "808"], capture_output=True, text=True,
+                         env=env, check=True).stdout
+    assert "tau" in out and "[tune.dive]" not in out

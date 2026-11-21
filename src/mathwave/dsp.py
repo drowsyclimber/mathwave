@@ -28,11 +28,14 @@ class Features:
 
     t: float = 0.0
     levels: dict[str, float] = field(default_factory=lambda: {k: 0.0 for k in DRIVES})
+    # Normalized but unsmoothed levels, for panels that apply their own attack/decay.
+    raw: dict[str, float] = field(default_factory=lambda: {k: 0.0 for k in DRIVES})
     centroid_hz: float = 0.0
     onset: bool = False
     since_onset: float = 1e9
     beat_period: float = 0.5
     spectrum: np.ndarray = field(default_factory=lambda: np.zeros(48, dtype=np.float32))
+    raw_spectrum: np.ndarray = field(default_factory=lambda: np.zeros(48, dtype=np.float32))
     fft_size: int = 2048
     rate: int = 44100
 
@@ -146,9 +149,11 @@ class Analyzer:
         rms = float(np.sqrt(np.mean(s**2))) if len(s) else 0.0
         raw["rms"] = 20.0 * np.log10(rms + 1e-9)
 
+        unsmoothed = {}
         for name, db in raw.items():
-            lvl = float(self.norm[name](db, dt)) * self.sensitivity
-            self.levels[name] = self._smooth(self.levels[name], min(1.0, lvl))
+            lvl = min(1.0, float(self.norm[name](db, dt)) * self.sensitivity)
+            unsmoothed[name] = lvl
+            self.levels[name] = self._smooth(self.levels[name], lvl)
 
         # Spectral centroid (brightness), mapped log-wise from 100 Hz..8 kHz to 0..1.
         total = mag.sum()
@@ -159,6 +164,7 @@ class Analyzer:
             c_lvl = float(np.clip(c, 0.0, 1.0))
         else:
             c_lvl = 0.0
+        unsmoothed["centroid"] = c_lvl
         self.levels["centroid"] = self._smooth(self.levels["centroid"], c_lvl)
 
         # Kick onset: positive spectral flux below 150 Hz over an adaptive threshold.
@@ -187,11 +193,13 @@ class Analyzer:
         return Features(
             t=t,
             levels=dict(self.levels),
+            raw=unsmoothed,
             centroid_hz=self.centroid_hz,
             onset=onset,
             since_onset=t - self.last_onset,
             beat_period=self.beat_period,
             spectrum=self.bars.astype(np.float32).copy(),
+            raw_spectrum=target.astype(np.float32).copy(),
             fft_size=self.n,
             rate=self.rate,
         )

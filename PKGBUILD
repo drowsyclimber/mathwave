@@ -1,7 +1,7 @@
 # Maintainer: Mike Falls <96034740+drowsyclimber@users.noreply.github.com>
 pkgname=mathwave
-pkgver=0.1.0
-pkgrel=4
+pkgver=0.2.0
+pkgrel=1
 pkgdesc="Cava-style terminal audio visualizer that drives a grid of math functions and prints their formulas"
 arch=('any')
 url="https://github.com/drowsyclimber/mathwave"
@@ -14,7 +14,7 @@ optdepends=(
   'pipewire: pw-record capture'
   'alsa-utils: aplay output for --demo --audible'
 )
-# Local build: run `makepkg -si` next to mathwave-0.1.0.tar.gz.
+# Local build: run `makepkg -si` next to mathwave-$pkgver.tar.gz.
 # For the AUR, swap this for the GitHub release tarball (see packaging/PKGBUILD.aur).
 source=("$pkgname-$pkgver.tar.gz")
 sha256sums=('SKIP')

@@ -15,7 +15,7 @@ from . import __version__, synth
 from .audio import DemoSource, build_source
 from .config import Config, check_fft_size, default_path, load
 from .dsp import Analyzer, Features
-from .panels import BUILTIN, DEFAULT_ORDER, make_panels
+from .panels import BUILTIN, COMMON_KEYS, DEFAULT_ORDER, make_panels
 from .render import DRIVE_LABEL, THEMES, Renderer
 
 THEME_ORDER = list(THEMES) + ["wal"]
@@ -44,6 +44,8 @@ def parse_args(argv=None):
     ap.add_argument("--no-color", action="store_true", help="disable color")
     ap.add_argument("--formulas", action="store_true", help="print every panel's formula and exit")
     ap.add_argument("--list-panels", action="store_true", help="list panel keys and exit")
+    ap.add_argument("--list-knobs", nargs="?", const="all", metavar="PANEL",
+                    help="list the [tune.<panel>] keys for every panel (or one) and exit")
     ap.add_argument("--render-wav", metavar="PATH", help="write the demo track to a WAV file and exit")
     ap.add_argument("--seconds", type=float, default=synth.BEAT * synth.SECTION_BEATS * synth.N_LAYERS,
                     help="length for --render-wav (default: one full loop)")
@@ -82,6 +84,33 @@ def apply_args(cfg: Config, a) -> Config:
     return cfg
 
 
+def build_panels(cfg: Config):
+    return make_panels(cfg.panels, cfg.custom, cfg.tune, cfg.attack, cfg.decay)
+
+
+def print_knobs(cfg: Config, which: str) -> int:
+    panels = [cls() for cls in BUILTIN] + list(cfg.custom.values())
+    if which != "all":
+        panels = [p for p in panels if p.key == which]
+        if not panels:
+            print(f"mathwave: no panel '{which}'", file=sys.stderr)
+            return 2
+    print("Keys every [tune.<panel>] section accepts:")
+    for k, desc in COMMON_KEYS.items():
+        print(f"  {k:10s} {desc}")
+    print("  drive names: " + " ".join(sorted(DRIVE_LABEL)))
+    print()
+    for p in panels:
+        print(f"[tune.{p.key}]   {p.title}")
+        print(f"  drive      default: {p.default_drive}")
+        for name, (default, desc) in p.KNOBS.items():
+            print(f"  {name:10s} default {default:g}: {desc}")
+        if not p.KNOBS:
+            print("  (no extra knobs; shape it with the common keys" + (", or use level in params)" if p.key in cfg.custom else ")"))
+        print()
+    return 0
+
+
 def print_formulas(panels) -> None:
     for i, p in enumerate(panels, 1):
         print(f"{i}. {p.title}")
@@ -89,6 +118,8 @@ def print_formulas(panels) -> None:
         if p.identity:
             print(f"   {p.identity}")
         print(f"   driven by: {DRIVE_LABEL.get(p.drive, p.drive)}")
+        if p.tuning_summary():
+            print(f"   tuned: {p.tuning_summary()}")
         print(f"   sounds like: {p.sound}")
         print()
 
@@ -104,7 +135,7 @@ def _status(src_name: str, f: Features, cfg: Config, note: str | None, paused: b
 
 def dump(cfg: Config, frames: int, size: str, focus: int | None = None, at: float | None = None) -> int:
     cols, rows = (int(v) for v in size.lower().split("x"))
-    panels = make_panels(cfg.panels, cfg.custom)
+    panels = build_panels(cfg)
     an = Analyzer(cfg.rate, fft_size=cfg.fft_size, n_bars=cfg.bars, attack=cfg.attack, decay=cfg.decay, noise_floor_db=cfg.noise_floor_db,
                   dynamic_range_db=cfg.dynamic_range_db, sensitivity=cfg.sensitivity)
     src, _ = build_source("offline", rate=cfg.rate)
@@ -169,8 +200,24 @@ class Terminal:
         self.out.flush()
 
 
-def run(cfg: Config, audible: bool, focus: int | None) -> int:
-    panels = make_panels(cfg.panels, cfg.custom)
+def reload_config(path: str | None, args, old: Config, an: Analyzer):
+    """Re-read the config and rebuild the panels. Returns (cfg, panels, note).
+
+    Settings that need a new audio pipeline (input, rate, fft_size, dynamic range,
+    noise floor, bars) keep their running values until restart."""
+    cfg = apply_args(load(path), args)
+    panels = build_panels(cfg)
+    an.attack, an.decay, an.sensitivity = cfg.attack, cfg.decay, cfg.sensitivity
+    pending = [name for name in ("method", "source", "rate", "fft_size", "dynamic_range_db", "noise_floor_db", "bars")
+               if getattr(cfg, name) != getattr(old, name)]
+    note = "config reloaded" + (f" ({', '.join(pending)} apply on restart)" if pending else "")
+    for name in ("method", "source", "rate", "fft_size", "dynamic_range_db", "noise_floor_db", "bars"):
+        setattr(cfg, name, getattr(old, name))
+    return cfg, panels, note
+
+
+def run(cfg: Config, audible: bool, focus: int | None, args=None) -> int:
+    panels = build_panels(cfg)
     an = Analyzer(cfg.rate, fft_size=cfg.fft_size, n_bars=cfg.bars, attack=cfg.attack, decay=cfg.decay, noise_floor_db=cfg.noise_floor_db,
                   dynamic_range_db=cfg.dynamic_range_db, sensitivity=cfg.sensitivity)
     src, note = build_source(cfg.method, cfg.source, cfg.rate, cfg.channels, cfg.fifo, audible)
@@ -200,6 +247,15 @@ def run(cfg: Config, audible: bool, focus: int | None) -> int:
                         focus = None if focus == n - 1 or n > len(panels) else n - 1
                     elif ch in "gG":
                         focus = None
+                    elif ch in "rR" and args is not None:
+                        try:
+                            cfg, panels, note = reload_config(args.config, args, cfg, an)
+                            rend = Renderer(cfg.theme, cfg.gradient, cfg.color_mode)
+                            footer = cfg.formulas
+                            if focus is not None and focus >= len(panels):
+                                focus = None
+                        except SystemExit as exc:
+                            note = "config error: " + str(exc).removeprefix("mathwave: ").split(";")[0]
                     elif ch in "fF":
                         footer = (footer - 1) % 3
                     elif ch in "tT":
@@ -244,6 +300,8 @@ def run(cfg: Config, audible: bool, focus: int | None) -> int:
 def main(argv=None) -> int:
     a = parse_args(argv)
     cfg = apply_args(load(a.config), a)
+    if a.list_knobs:
+        return print_knobs(cfg, a.list_knobs)
     if a.list_panels:
         for cls in BUILTIN:
             print(f"{cls.key:10s} {cls.title}")
@@ -251,7 +309,7 @@ def main(argv=None) -> int:
             print(f"{k:10s} {p.title} (config)")
         return 0
     if a.formulas:
-        print_formulas(make_panels(cfg.panels, cfg.custom))
+        print_formulas(build_panels(cfg))
         return 0
     if a.render_wav:
         synth.write_wav(a.render_wav, a.seconds, cfg.rate)
@@ -262,4 +320,4 @@ def main(argv=None) -> int:
     if not sys.stdout.isatty():
         print("mathwave: stdout is not a terminal (use --dump for headless output)", file=sys.stderr)
         return 2
-    return run(cfg, a.audible, None if a.focus is None else a.focus - 1)
+    return run(cfg, a.audible, None if a.focus is None else a.focus - 1, a)

@@ -322,6 +322,8 @@ class Renderer:
         if focus:
             lines += [("", sub), ("sound: " + panel.sound, sub), ("drive: " + DRIVE_LABEL.get(panel.drive, panel.drive)
                       + f"   level {panel.level:.2f}", sub)]
+            tuned = panel.tuning_summary()
+            lines.append(("tuned: " + tuned if tuned else "tuned: defaults (add a [tune." + panel.key + "] section)", sub))
         plot_h = h - 2 - len(lines) - (1 if lines else 0)
         while plot_h < 2 and lines:
             lines.pop(1 if len(lines) > 1 else 0)
@@ -368,7 +370,7 @@ class Renderer:
         top = 1 if rows > 10 else 0
         if top:
             left = f" mathwave · {status}"
-            right = "1-9,0 focus · g grid · f formulas · t theme · +/- gain · p pause · q quit " if hints else ""
+            right = "1-9,0 focus · g grid · f formulas · r reload · t theme · +/- gain · q quit " if hints else ""
             scr.text(0, 0, left, S.get(pal[0], bold=True), maxw=cols)
             if right and len(left) + len(right) + 2 < cols:
                 scr.text(0, cols - len(right), right, S.get((130, 130, 130)))

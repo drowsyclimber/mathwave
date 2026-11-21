@@ -50,17 +50,97 @@ dynamic_range_db = 40
 fft_size = 2048
 
 # Custom panels: write your own formula. y is plotted over x in `domain`.
-# Drive names you can use in params: sub bass lowmid mid highmid presence air rms centroid t beat
+# Names you can use in params: level (this panel's drive after [tune.<key>] shaping),
+# sub bass lowmid mid highmid presence air rms centroid t beat
 # Functions: sin cos tan exp log sqrt abs tanh sinh cosh arcsin arccos arctan sinc sign floor mod clip min max
 # Constants: pi e tau. Use ^ or ** for powers.
 # Optional keys: title, domain, yrange, drive (feeds the level meter), sound (shown in focus view).
 #
 # Gaussian bell driven by bass: louder bass makes the bell taller and wider.
+# It uses `level`, so a [tune.bell] section below can reshape it like any built-in.
 [panel.bell]
 title = bell · gaussian
 expr = A*exp(-x^2/(2*s^2))
-params = A = 0.15 + 0.85*bass, s = 0.06 + 0.30*bass
+params = A = 0.15 + 0.85*level, s = 0.06 + 0.30*level
 domain = -1, 1
 yrange = -0.05, 1.05
 drive = bass
 sound = A soft kick thump: the Gaussian is the smoothest pulse, with no sharp edges to click.
+
+# ----------------------------------------------------------------- per-panel tuning
+# Any panel can have a [tune.<panel>] section. Every key is optional.
+# Run `mathwave --list-knobs` (or `mathwave --list-knobs 808`) for the full list.
+# Press r while mathwave runs to reload this file without restarting.
+#
+# Keys every panel accepts:
+#   drive       what the panel listens to: a band (sub bass lowmid mid highmid presence air),
+#               rms (loudness), centroid (brightness), or an expression like max(sub, 0.7*bass)
+#   gain        multiply the level first (default 1)
+#   threshold   ignore anything below this, 0..1 (default 0)
+#   curve       1 linear, 2 punchier, 0.5 more sensitive (default 1)
+#   min, max    the range the panel moves within, 0..1 (default 0 and 1; min > max inverts)
+#   attack      this panel's rise speed, 0..1 (default: [smoothing] attack)
+#   decay       this panel's fall speed, 0..1 (default: [smoothing] decay)
+# The order is: drive -> gain -> threshold -> curve -> min..max -> attack/decay.
+# Each panel also has its own knobs for its formula's constants (shown below with examples).
+# The examples are commented out; remove the leading "# " to use one.
+
+# Kick only, tight and punchy, with a longer pitch drop.
+# [tune.808]
+# drive = sub
+# curve = 2
+# decay = 0.85
+# tau = 0.3
+# reveal = 0.25
+
+# Slower, wider asymptote sweep (one swing per bar).
+# [tune.dive]
+# drive = max(bass, 0.5*lowmid)
+# beats = 4
+# sweep = 0.9
+
+# Only growls on real bass lines, with a heavier maximum detune.
+# [tune.reese]
+# drive = lowmid
+# threshold = 0.2
+# detune_max = 8
+# attack = 0.4
+
+# Twitchier screech that reacts to hi-hats and snares.
+# [tune.tan]
+# drive = highmid
+# attack = 0.9
+# decay = 0.7
+# freq_max = 14
+
+# Wobble twice per beat, with a deeper maximum modulation.
+# [tune.fm]
+# beats = 0.5
+# index_max = 12
+
+# More harmonics, but only on bright passages.
+# [tune.saw]
+# curve = 1.5
+# n_max = 40
+
+# Narrower sinc that listens to presence instead of air.
+# [tune.sinc]
+# drive = presence
+# gain = 1.5
+# width_max = 24
+
+# Goes chaotic only when the bass is heavy.
+# [tune.logistic]
+# drive = bass
+# threshold = 0.3
+# r_min = 3.0
+
+# Slow-falling bars with quiet bins pulled up.
+# [tune.spectrum]
+# curve = 0.7
+# decay = 0.95
+
+# Bell on sub-bass with a punchy response.
+# [tune.bell]
+# drive = sub
+# curve = 2

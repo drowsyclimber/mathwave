@@ -36,6 +36,7 @@ class Config:
     dynamic_range_db: float = 40.0
     fft_size: int = 2048
     custom: dict[str, ExprPanel] = field(default_factory=dict)
+    tune: dict[str, dict[str, str]] = field(default_factory=dict)
     path: str | None = None
 
 
@@ -117,6 +118,10 @@ def load(path: str | None = None) -> Config:
     cfg.fft_size = check_fft_size(int(s.get("fft_size", cfg.fft_size)))
 
     for name in cp.sections():
+        if name.startswith("tune."):
+            key = name.split(".", 1)[1].strip()
+            cfg.tune[key] = {k: v for k, v in cp[name].items()}
+            continue
         if not name.startswith("panel."):
             continue
         key = name.split(".", 1)[1]
@@ -132,6 +137,8 @@ def load(path: str | None = None) -> Config:
                 drive=sec.get("drive", "rms"),
                 sound=sec.get("sound"),
             )
-        except (KeyError, ValueError, SyntaxError) as exc:
+        except KeyError as exc:
+            raise SystemExit(f"mathwave: [{name}] in {path} is missing {exc}")
+        except (ValueError, SyntaxError) as exc:
             raise SystemExit(f"mathwave: bad [{name}] in {path}: {exc}")
     return cfg

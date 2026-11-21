@@ -1,4 +1,4 @@
-.TH MATHWAVE 1 "November 2026" "mathwave 0.1.0" "User Commands"
+.TH MATHWAVE 1 "November 2026" "mathwave 0.2.0" "User Commands"
 .SH NAME
 mathwave \- terminal audio visualizer that drives a grid of math functions
 .SH SYNOPSIS
@@ -54,7 +54,10 @@ FFT size: 1024, 2048 (default), 4096 or 8192. Larger sizes separate sub-bass fro
 Start with panel N full screen.
 .TP
 .B \-\-formulas
-Print every panel's formula, drive signal and sound, then exit.
+Print every panel's formula, drive signal, tuning and sound, then exit.
+.TP
+.BI \-\-list\-knobs " [PANEL]"
+List the keys a [tune.PANEL] section accepts, with defaults, for every panel or one.
 .TP
 .BI \-\-render\-wav " PATH"
 Write the demo track to a WAV file and exit.
@@ -72,6 +75,11 @@ Show that panel full screen with its formula, sound and drive (0 is panel 10). P
 .B f
 Cycle formula detail: full, formula plus values, hidden.
 .TP
+.B r
+Reload the config file. Panels, tuning, smoothing, gain, theme and layout change at once;
+input, rate, fft_size, dynamic range, noise floor and bar count apply on restart.
+A config error is shown in the status bar and the running settings are kept.
+.TP
 .B t
 Next color theme.
 .TP
@@ -83,6 +91,29 @@ Pause.
 .TP
 .B q, Esc
 Quit.
+.SH TUNING
+Each panel can have a
+.B [tune.PANEL]
+section in the config file. Keys every panel accepts:
+.TP
+.B drive
+What the panel listens to: sub, bass, lowmid, mid, highmid, presence, air, rms, centroid,
+or an expression such as max(sub, 0.7*bass).
+.TP
+.B gain, threshold, curve, min, max
+Shape the level, in that order: multiply, ignore everything below the threshold,
+raise to the curve exponent, then map into min..max.
+.TP
+.B attack, decay
+Smoothing for this panel only. When set, the panel reads unsmoothed levels, so it can
+move faster or slower than the global [smoothing] values.
+.PP
+Panels also have knobs for their own constants, for example tau and reveal on the 808
+panel. Run
+.B mathwave \-\-list\-knobs
+to see them. Custom panels can use
+.B level
+in their params to pick up their tuning.
 .SH FILES
 .TP
 .I ~/.config/mathwave/config
