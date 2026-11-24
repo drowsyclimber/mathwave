@@ -1,4 +1,4 @@
-.TH MATHWAVE 1 "November 2026" "mathwave 0.7.0" "User Commands"
+.TH MATHWAVE 1 "November 2026" "mathwave 0.8.0" "User Commands"
 .SH NAME
 mathwave \- terminal audio visualizer that drives a grid of math functions
 .SH SYNOPSIS
@@ -250,7 +250,17 @@ Each panel is labeled on its bottom border. PHYSICS: the formula is a real law (
 MIXED: a real quantity is inside a sound choice (horizon, light, tides, headfeet,
 spaghetti). METAPHOR: the formula is sound design and only the caption is physics (sos,
 engines, noway, crush). The focus view prints a physics check that says which part is
-which, and so does \-\-formulas. Every panel has mass (millions of suns) and tilt knobs.
+which, and so does \-\-formulas. Every panel has mass (millions of suns), tilt and spin knobs.
+.PP
+.B spin
+is the Kerr spin a/M, \-0.99 to 0.99 on the slider and up to \(+-0.998 in the config (0 by default, since the spin of Sgr A* is not
+pinned down). Positive spins with the disk, negative against it. The shadow becomes
+Bardeen's flattened critical curve, the disk's inner edge moves to the Kerr innermost
+stable orbit (0.62 r_s at a = 0.998 with the disk, 4.5 r_s against it), and frame
+dragging turns plunging gas around near the horizon. The fall runs along the spin axis
+from the outer to the inner horizon: 77.5 s at a = 0.5 and 90.5 s at a = 0.9. The axis
+tide 2r(r\u2\d \- 3a\u2\d)/(r\u2\d + a\u2\d)\u3\d squeezes inside r = \(sr3\(md a and
+stays below 0.01 g, and the physics checks say so.
 .PP
 In [general],
 .B pages = math | cern | hole

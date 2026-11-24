@@ -10,7 +10,7 @@ Press `n` for a second page, [the CERN page](#the-cern-page): eleven panels that
 
 [![mathwave CERN page](docs/mathwave-cern.png)](#the-cern-page)
 
-Press `n` again for [the black hole page](#the-black-hole-page): your last 66.5 seconds inside Sagittarius A*, with a lensed black hole drawn over every formula and each panel labeled PHYSICS, MIXED or METAPHOR.
+Press `n` again for [the black hole page](#the-black-hole-page): your last 66.5 seconds inside Sagittarius A*, with a lensed black hole drawn over every formula and each panel labeled PHYSICS, MIXED or METAPHOR. A `spin` knob turns it into a [spinning Kerr hole](#spin).
 
 ## Panels
 
@@ -87,7 +87,29 @@ Every panel carries a label on its bottom border, and its focus view (`1`–`9`,
 | 9 | `spaghetti` | `y = sin(2π∫5/s(x) dx)`, `s = 1 + (3/2)·log₁₀(Δa/1 g)` | MIXED | the tide on a 2 m body reaches 1 g only 615,000 km from the center, 0.3 s before the end |
 | 10 | `singular` | `y = 3(1 − x/x₀)^(2/3)·sin 8πx → 0` | PHYSICS | near r = 0 a free fall obeys r ∝ (τ₀ − τ)^(2/3); the dim curve is the exact cycloid r(τ) |
 
-On the panels that use Δa (`headfeet`, `crush`, `spaghetti`), the music picks how deep you are: quiet is the horizon's 1e-4 g, loud is 10,000 g, and the live line shows the radius where the tide really is that strong. Every panel has `mass` (millions of suns) and `tilt` (the view of the disk) knobs, so `mass = 1` under `[tune.singular]` gives a 15.5-second fall.
+On the panels that use Δa (`headfeet`, `crush`, `spaghetti`), the music picks how deep you are: quiet is the horizon's 1e-4 g, loud is 10,000 g, and the live line shows the radius where the tide really is that strong. Every panel has `mass` (millions of suns), `tilt` (the view of the disk) and `spin` knobs, so `mass = 1` under `[tune.singular]` gives a 15.5-second fall.
+
+### Spin
+
+Every black hole panel also has a `spin` knob, the Kerr spin a/M. At 0 (the default) the hole does not rotate and everything above holds. Turn it up and the hole spins with the disk; turn it below 0 and it spins against it. The slider stops at ±0.99, and the config takes up to ±0.998, Thorne's limit for a hole fed by a disk.
+
+![mathwave spinning black hole](docs/mathwave-spin.png)
+
+What changes on screen, all from the Kerr solution:
+
+- The shadow stops being a circle. Its edge is Bardeen's critical curve for that spin and tilt, flattened and pushed toward the side of the disk coming at you, and the photon ring follows it.
+- The disk's inner edge moves. The innermost stable orbit (Bardeen, Press and Teukolsky 1972) shrinks from 3 r_s to 0.62 r_s at a = 0.998 when the hole spins with the disk, and grows to 4.5 r_s when it spins against it. The rings, clumps and plunging gas follow it.
+- The brightness uses the Kerr orbital speed Ω = 1/(r^1.5 + a), with r and a in units of GM/c², for the Doppler and gravitational shift of each ring.
+- Frame dragging grabs the gas once it plunges. Against the spin, it orbits backwards at first, then gets turned around near the horizon and swept along with the hole.
+
+The fall changes too. A spinning hole has two horizons, and the slowest fall, along the spin axis, goes from the outer one to the inner one instead of to r = 0. For Sagittarius A* that takes 77.5 s at a = 0.5, 90.5 s at a = 0.9 and 94.0 s at a = 0.998, and the panels count down that time instead of 66.5 s. Near the end, r − r₋ ∝ (τ₀ − τ)², so the singularity panel switches its label to MIXED: the dim curve is still the exact r(τ), but the 2/3 power on its envelope is the no-spin law. On the axis the tide is 2r(r² − 3a²)/(r² + a²)³ in units of c⁶/(GM)², which turns into a squeeze inside r = √3·a, and for this mass it never gets anywhere near spaghetti: at a = 0.5 it stretches you at most 1.6e-4 g, then squeezes up to 5.3e-3 g, and at a = 0.9 it only squeezes, up to 7.6e-4 g. The focus views rewrite their physics checks to say so.
+
+The spin of Sagittarius A* is not pinned down yet, so the default stays at 0. To try one:
+
+```ini
+[tune.horizon]
+spin = 0.9
+```
 
 ## Pages
 

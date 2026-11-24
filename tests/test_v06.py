@@ -334,7 +334,7 @@ def test_gas_plunges_inside_the_innermost_orbit():
     p.update(f, 1 / 60)
     drop = before - p.gas_r
     assert drop[before < 3].min() > 5 * drop[before > 3].max()
-    p.gas_r[:] = 1.61
+    p.gas_r[:] = bh.horizons(0.0)[0] / 2 + 0.041  # just outside the horizon, at 1 r_s
     p.update(f, 1 / 60)
     assert np.all(p.gas_r == bh.R_OUT)  # swallowed gas is replaced at the outer edge
 
