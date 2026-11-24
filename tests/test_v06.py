@@ -263,3 +263,100 @@ def test_no_knob_shadows_a_shared_tuning_key():
     from mathwave.panels import BUILTIN, COMMON_KEYS
     for cls in BUILTIN + CERN + bh.HOLE:
         assert not set(cls.KNOBS) & set(COMMON_KEYS), cls.key
+
+
+# ---------------------------------------------------------------- 0.7: a bigger, busier black hole
+
+
+def test_lens_images_solve_the_lens_equation():
+    bx, by = np.array([0.5, 4.0, -9.0]), np.array([1.0, -2.0, 0.3])
+    (ox, oy), (ix, iy) = bh.lens(bx, by, 3.3)
+    beta = np.hypot(bx, by)
+    for x, y in ((ox, oy), (ix, iy)):
+        th = np.hypot(x, y) * np.sign(x * bx + y * by)
+        assert np.allclose(th - 3.3**2 / th, beta)
+    assert np.all(np.hypot(ox, oy) > 3.3) and np.all(np.hypot(ix, iy) < 3.3)
+
+
+def test_project_matches_the_ring_images():
+    phi = np.linspace(0, 2 * np.pi, 181)
+    X, Y, g = bh.project(np.full_like(phi, 4.9), phi, 80.0)
+    ring = bh.disk_image(80.0, (4.9,), 181)[0]
+    assert np.allclose(X, ring[0]) and np.allclose(Y, ring[1]) and np.allclose(g, ring[2])
+
+
+def _bounds(layers):
+    xs = np.concatenate([np.ravel(v[0]) for _, v, _ in layers])
+    ys = np.concatenate([np.ravel(v[1]) for _, v, _ in layers])
+    ok = np.isfinite(xs) & np.isfinite(ys) & (np.abs(xs) < 1.2)
+    return ys[ok].min(), ys[ok].max()
+
+
+def test_scene_fills_the_height_and_is_batched():
+    p = make_panels(["horizon"], {})[0]
+    p.update(features(), 1 / 60)
+    ys = np.concatenate([(Y - bh.OFFSET) / bh.SCALE for _, Y, _ in bh.disk_image(80.0, bh.FINE_RADII)])
+    ring_lo = (-bh.B_CRIT - bh.OFFSET) / bh.SCALE
+    hi, lo = ys.max(), min(ys.min(), ring_lo)
+    assert 0.8 < hi <= 1.0 and -1.0 <= lo < -0.75  # centered, using the whole height
+    lo2, hi2 = _bounds([layer for layer in p.scene(96, 300) if layer[0] == "iso"])
+    assert lo2 >= -1.1 and hi2 <= 1.1
+    assert len(p.scene(96, 300)) <= 6  # a few long polylines, not hundreds of short ones
+
+
+def test_big_views_get_more_detail():
+    p = make_panels(["horizon"], {})[0]
+    p.update(features(), 1 / 60)
+    count = lambda layers: sum(np.isfinite(np.ravel(v[0])).sum() for _, v, _ in layers)  # noqa: E731
+    assert count(p.scene(120, 300)) > 1.4 * count(p.scene(24, 90))
+
+
+def test_the_disk_moves():
+    f = features()
+    p = make_panels(["horizon"], {})[0]
+    p.update(f, 1 / 60)
+    c0, g0, s0 = p.clump_phi.copy(), p.gas_r.copy(), p.star_x.copy()
+    for _ in range(30):
+        p.update(f, 1 / 60)
+    turned = (p.clump_phi - c0) % (2 * np.pi)
+    assert np.all(turned > 0)
+    inner, outer = np.argmin(p.clump_r), np.argmax(p.clump_r)
+    assert turned[inner] > turned[outer]  # Kepler: inner clumps orbit faster
+    assert not np.allclose(p.gas_r, g0) and not np.allclose(p.star_x, s0)
+
+
+def test_gas_plunges_inside_the_innermost_orbit():
+    f = features()
+    p = make_panels(["horizon"], {})[0]
+    p.update(f, 1 / 60)
+    p.gas_r[:] = np.linspace(2.0, 6.0, len(p.gas_r))
+    before = p.gas_r.copy()
+    p.update(f, 1 / 60)
+    drop = before - p.gas_r
+    assert drop[before < 3].min() > 5 * drop[before > 3].max()
+    p.gas_r[:] = 1.61
+    p.update(f, 1 / 60)
+    assert np.all(p.gas_r == bh.R_OUT)  # swallowed gas is replaced at the outer edge
+
+
+def test_kick_flares_the_photon_ring():
+    f = features()
+    p = make_panels(["horizon"], {})[0]
+    p.update(f, 1 / 60)
+    p.level, p.onset, p.flare = 1.0, True, 0.0
+    p._animate(1 / 60)
+    assert p.flare == 1.0
+    p.onset = False
+    for _ in range(60):
+        p._animate(1 / 60)
+    assert p.flare < 0.1
+
+
+def test_focus_gives_the_black_hole_more_rows(tmp_path):
+    app, _ = make_app(tmp_path, "[general]\npanels = hole\n")
+    run(app, 10)
+    grid = plain(app.draw(168, 56, "demo"))
+    app.key("1", 0)
+    focus = plain(app.draw(168, 56, "demo"))
+    dots = lambda lines: sum(1 for line in lines for ch in line if 0x2800 < ord(ch) <= 0x28FF)  # noqa: E731
+    assert dots(focus[:30]) > dots(grid[:12])

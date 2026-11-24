@@ -11,7 +11,11 @@ approximation (1 − cos α = (1 − cos ψ)(1 − r_s/r)). That lifts the far s
 into the arc over the top of the hole. The side of the disk turning toward you is drawn
 bright, from the Doppler and gravitational shift of an orbit at that radius. The ring at
 b = (√27/2)·r_s is the photon ring, the edge of the shadow. The music ripples the disk:
-each ring carries the spectrum around at its own orbital speed.
+each ring carries the spectrum around at its own orbital speed. Hot clumps orbit at Kepler
+rates (inner ones faster), gas spirals in and plunges once inside 3 r_s, and background
+stars drift behind the hole, each split into two images by the point-lens equation
+β = θ − θ_E²/θ. Picture time is sped up by the music; a real orbit at 3 r_s around
+Sgr A* takes about half an hour.
 
 The fall is real too. A body dropped from rest at the horizon follows the cycloid
 r = r_s·cos²(η/2), τ = (GM/c³)(η + sin η), which takes πGM/c³ = 66.5 s for Sgr A*,
@@ -41,7 +45,11 @@ SGR_A = 4.297          # millions of suns (GRAVITY 2023)
 BODY = 2.0             # m, head to feet
 B_CRIT = math.sqrt(27.0) / 2.0   # photon ring radius in r_s
 RADII = (3.0, 3.9, 4.9, 6.1)     # disk rings in r_s; 3 r_s is the innermost stable orbit
-SCALE = 5.3            # r_s per scene unit, so the arc over the top fits
+FINE_RADII = (3.0, 3.5, 4.1, 4.7, 5.4, 6.1, 6.9)  # the same disk with more rings, for big views
+R_OUT = 7.0            # outer edge of the disk, in r_s
+SCALE = 4.5            # r_s per scene unit
+OFFSET = 1.3           # the image sits this far above the hole (the far-side arc), so center on it
+THETA_E = 3.3          # Einstein radius of the background lens, in r_s
 
 
 # ---------------------------------------------------------------- the physics
@@ -60,6 +68,18 @@ def fall_time(mass_millions: float) -> float:
 
 def eta_of(frac):
     """Cycloid angle η in 0..π with (η + sin η)/π = frac, the fraction of the fall done."""
+    if np.ndim(frac) == 0:  # the per-frame clock: plain floats are much faster
+        target = min(1.0, max(0.0, float(frac))) * math.pi
+        if target >= math.pi:
+            return math.pi
+        lo_s, hi_s = 0.0, math.pi
+        for _ in range(48):
+            mid = 0.5 * (lo_s + hi_s)
+            if mid + math.sin(mid) < target:
+                lo_s = mid
+            else:
+                hi_s = mid
+        return 0.5 * (lo_s + hi_s)
     target = np.clip(np.asarray(frac, dtype=np.float64), 0.0, 1.0) * math.pi
     lo, hi = np.zeros_like(target), np.full_like(target, math.pi)
     for _ in range(48):  # η + sin η is monotone on 0..π
@@ -108,44 +128,69 @@ def km_text(r_m: float) -> str:
     return f"{r_m:,.0f} m"
 
 
+def project(r, phi, tilt_deg: float):
+    """Where light from disk points (r in r_s, azimuth phi) lands on the sky, seen at tilt_deg
+    from face-on: (X, Y, shift), with light bending from Beloborodov's approximation and the
+    shift g = √(1 − r_s/r) / (γ(1 − β·cos)) of a circular orbit there (g > 1 moves toward you)."""
+    i = math.radians(min(89.5, max(1.0, tilt_deg)))
+    si, ci = math.sin(i), math.cos(i)
+    rr = np.maximum(np.asarray(r, dtype=np.float64), 1.05)
+    phi = np.asarray(phi, dtype=np.float64)
+    u = 1.0 / rr
+    px, py = np.cos(phi), np.sin(phi)
+    cos_psi = py * si
+    cos_a = 1.0 - (1.0 - cos_psi) * (1.0 - u)
+    sin_a = np.sqrt(np.clip(1.0 - cos_a**2, 0.0, 1.0))
+    b = rr * sin_a / np.sqrt(1.0 - u)
+    ex, ey, ez = px, py - cos_psi * si, -cos_psi * ci
+    norm = np.sqrt(ex**2 + ey**2 + ez**2) + 1e-12
+    X = b * ex / norm
+    Y = b * (-ey * ci + ez * si) / norm
+    beta = np.sqrt(np.clip(u / (2.0 * (1.0 - u)), 0.0, 0.99))
+    gamma = 1.0 / np.sqrt(1.0 - beta**2)
+    shift = np.sqrt(1.0 - u) / (gamma * (1.0 - beta * px * si))
+    return X, Y, shift
+
+
+def lens(bx, by, theta_e: float = THETA_E):
+    """Point-lens images of a background star at sky position (bx, by): both solutions of
+    the lens equation β = θ − θ_E²/θ, the bright one outside θ_E and the faint one inside."""
+    bx, by = np.asarray(bx, dtype=np.float64), np.asarray(by, dtype=np.float64)
+    beta = np.hypot(bx, by) + 1e-9
+    root = np.sqrt(beta**2 + 4 * theta_e**2)
+    outer, inner = (beta + root) / 2, (beta - root) / 2
+    ux, uy = bx / beta, by / beta
+    return (ux * outer, uy * outer), (ux * inner, uy * inner)
+
+
 def disk_image(tilt_deg: float, radii=RADII, n: int = 181, ripple=None):
     """Sky positions (in r_s) of disk rings seen at tilt_deg from face-on, with light bending.
 
-    Returns [(X, Y, shift)] per ring, where shift is the combined Doppler and gravitational
-    frequency shift g = √(1 − r_s/r) / (γ(1 − β·cos)); g > 1 is the side moving toward you.
-    ripple(phi, r) -> fractional radius change, for the music."""
-    i = math.radians(min(89.5, max(1.0, tilt_deg)))
-    si, ci = math.sin(i), math.cos(i)
+    Returns [(X, Y, shift)] per ring (see project). ripple(phi, r) -> fractional radius
+    change, for the music."""
     phi = np.linspace(0.0, TAU, n)
-    out = []
-    for r0 in radii:
-        rr = r0 * (1.0 + (ripple(phi, r0) if ripple is not None else 0.0))
-        u = 1.0 / rr
-        px, py = np.cos(phi), np.sin(phi)
-        cos_psi = py * si                       # angle between the point and the line of sight
-        cos_a = 1.0 - (1.0 - cos_psi) * (1.0 - u)   # Beloborodov 2002
-        sin_a = np.sqrt(np.clip(1.0 - cos_a**2, 0.0, 1.0))
-        b = rr * sin_a / np.sqrt(1.0 - u)       # impact parameter: distance from center on the sky
-        ex, ey, ez = px, py - cos_psi * si, -cos_psi * ci
-        norm = np.sqrt(ex**2 + ey**2 + ez**2) + 1e-12
-        X = b * ex / norm
-        Y = b * (-ey * ci + ez * si) / norm
-        beta = np.sqrt(u / (2.0 * (1.0 - u)))   # circular orbit speed seen by a static observer
-        gamma = 1.0 / np.sqrt(1.0 - beta**2)
-        toward = np.cos(phi) * si                # velocity (−sin φ, cos φ, 0) along the line of sight
-        shift = np.sqrt(1.0 - u) / (gamma * (1.0 - beta * toward))
-        out.append((X, Y, shift))
-    return out
+    rr = np.concatenate([r0 * (1.0 + (ripple(phi, r0) if ripple is not None else np.zeros_like(phi))) for r0 in radii])
+    X, Y, g = project(rr, np.tile(phi, len(radii)), tilt_deg)  # one call for every ring
+    return [(X[k * n:(k + 1) * n], Y[k * n:(k + 1) * n], g[k * n:(k + 1) * n]) for k in range(len(radii))]
+
+
+_SECONDARY: dict = {}
 
 
 def secondary_image(tilt_deg: float, r0: float = RADII[0], n: int = 121):
     """The thin arc under the shadow: light from the far side that went under the hole.
     Approximated as the primary image pulled in toward the photon ring and flipped."""
+    key = (round(tilt_deg * 20), r0, n)
+    if key in _SECONDARY:
+        return _SECONDARY[key]
+    if len(_SECONDARY) > 256:
+        _SECONDARY.clear()
     (X, Y, _), = disk_image(tilt_deg, (r0,), n)
     b = np.hypot(X, Y)
     far = Y > 0
     k = (B_CRIT + 0.12 * (b - B_CRIT)) / np.maximum(b, 1e-9)
-    return np.where(far, -X * k, np.nan), np.where(far, -Y * k, np.nan)
+    _SECONDARY[key] = np.where(far, -X * k, np.nan), np.where(far, -Y * k, np.nan)
+    return _SECONDARY[key]
 
 
 # ---------------------------------------------------------------- the base panel
@@ -162,7 +207,8 @@ class _Hole(Panel):
     """A black hole scene over a trajectory trace. Subclasses define sweep(xs, f), which
     returns {channel: y} for the new x positions the pen crossed this frame."""
 
-    scene_split = 0.5
+    scene_split = 0.6         # share of the plot rows the black hole gets in the grid
+    scene_split_focus = 0.66  # and full screen
     verdict = "MIXED"
     truth = ""
     domain = (0.0, 4.0)       # in beats unless pen_on_fall
@@ -208,6 +254,7 @@ class _Hole(Panel):
         self.t += dt
         self.spec = np.asarray(f.spectrum, dtype=np.float64)
         self.onset = bool(f.onsets.get("kick"))
+        self._animate(dt)
         if self.frac >= 1.0:
             self.hold += dt
             if self.hold > 2.0:  # you are gone; the next one falls in
@@ -276,42 +323,127 @@ class _Hole(Panel):
 
     # -- the scene
 
+    def _setup_scene(self) -> None:
+        rng = np.random.default_rng(1974)  # the year Sgr A* was found
+        # Hot clumps riding the disk, and gas spiraling in from the outer edge.
+        self.clump_r = rng.uniform(3.3, 6.6, 9)
+        self.clump_phi = rng.uniform(0, TAU, 9)
+        self.gas_r = rng.uniform(1.6, R_OUT, 36)
+        self.gas_phi = rng.uniform(0, TAU, 36)
+        # Background stars, in r_s on the sky, drifting behind the hole.
+        self.star_x = rng.uniform(-22, 22, 70)
+        self.star_y = rng.uniform(-4.5, 7.5, 70)
+        self.star_b = rng.random(70) < 0.18
+        self.flare = 0.0
+
+    def _animate(self, dt: float) -> None:
+        if not hasattr(self, "clump_r"):
+            self._setup_scene()
+        speed = 0.5 + 0.9 * self.level              # the music speeds the picture up (time is not to scale)
+        omega = lambda r: 1.4 * speed * (3.0 / r) ** 1.5  # noqa: E731  Kepler: inner orbits turn faster
+        self.clump_phi = (self.clump_phi + omega(self.clump_r) * dt) % TAU
+        inside = self.gas_r < 3.0                   # inside the innermost stable orbit gas plunges
+        self.gas_r = self.gas_r - dt * speed * np.where(inside, 2.2, 0.18)
+        self.gas_phi = (self.gas_phi + omega(np.maximum(self.gas_r, 1.6)) * dt) % TAU
+        gone = self.gas_r < 1.6
+        if gone.any():
+            self.gas_r[gone] = R_OUT
+            self.gas_phi[gone] = np.random.default_rng(int(self.t * 1000) % 2**31).uniform(0, TAU, gone.sum())
+        self.star_x = (self.star_x - dt * 0.45 * speed + 22) % 44 - 22
+        self.flare = max(self.flare * math.exp(-dt / 0.35), self.level if self.onset else 0.0)
+
     def _ripple(self, phi, r):
         n = len(self.spec)
         if n == 0:
             return 0.0
         omega = 0.9 * (3.0 / r) ** 1.5  # inner rings turn faster, like orbits do
         idx = (((phi - omega * self.t) % TAU) / TAU * n).astype(int) % n
-        return 0.07 * self.level * self.spec[idx]
+        return (0.05 + 0.06 * self.flare) * self.level * self.spec[idx]
 
     def you(self) -> tuple[float, float]:
         """Where you are drawn: inside the shadow, at your real r/r_s (not to scale)."""
         rad = 0.9 * B_CRIT / SCALE * self.r_rs
         return ring(np.array(math.radians(215.0)), rad)
 
-    def scene(self) -> list:
+    def scene(self, gh: int = 48, gw: int = 160) -> list:
+        """The black hole, in scene units (y in about −1..1). gh and gw are the dot grid size,
+        used to pick the level of detail."""
+        if not hasattr(self, "clump_r"):
+            self._setup_scene()
+        big = gh >= 44
+        tilt = self.k["tilt"] + 1.5 * math.sin(0.23 * self.t)  # a slow camera sway
         out = []
-        th = np.linspace(0, TAU, 181)
-        out.append(("iso", ring(th, np.full_like(th, B_CRIT / SCALE)), "main"))
-        sx, sy = secondary_image(self.k["tilt"])
-        out.append(("iso", (sx / SCALE, sy / SCALE), "aux"))
-        for X, Y, shift in disk_image(self.k["tilt"], ripple=self._ripple):
-            bright = shift >= 0.9
-            xs, ys = X / SCALE, Y / SCALE
-            out.append(("iso", (np.where(bright, xs, np.nan), np.where(bright, ys, np.nan)), "main"))
-            dim = ~bright
-            dim[1:] |= dim[:-1].copy()  # keep the dim side joined to the bright side
-            out.append(("iso", (np.where(dim, xs, np.nan), np.where(dim, ys, np.nan)), "aux"))
-        out += self.overlay()
+        # Stars behind the hole, bent by it: two images each, none inside the shadow.
+        (ox, oy), (ix, iy) = lens(self.star_x, self.star_y)
+        for (x, y), style in (((ox, oy), "aux"),) + ((((ix, iy), "aux"),) if big else ()):
+            keep = np.hypot(x, y) > B_CRIT * 1.08
+            out.append(("iso_points", (np.where(keep, x, np.nan), np.where(keep, y, np.nan)), style))
+        bright = self.star_b & (np.hypot(ox, oy) > B_CRIT * 1.08)
+        out.append(("iso_points", (np.where(bright, ox, np.nan), np.where(bright, oy, np.nan)), "main"))
+        # The photon ring, which flares on the kick, and the thin image under the shadow.
+        th = np.linspace(0, TAU, 241)
+        out.append(("iso", ring(th, np.full_like(th, B_CRIT)), "main"))
+        if self.flare > 0.08:
+            out.append(("iso", ring(th, np.full_like(th, B_CRIT * (1.04 + 0.08 * self.flare))), "main"))
+        sx, sy = secondary_image(tilt)
+        out.append(("iso", (sx, sy), "aux"))
+        # The disk: three brightness levels from the Doppler shift.
+        hot = 1.1 - 0.15 * self.flare
+        for X, Y, shift in disk_image(tilt, FINE_RADII if big else RADII, 241 if big else 161, self._ripple):
+            solid = shift >= hot
+            mid = (shift >= 0.8) & ~solid
+            dim = shift < 0.8
+            dim[1:] |= dim[:-1].copy()  # keep the dim side joined to the rest
+            out.append(("iso", (np.where(solid, X, np.nan), np.where(solid, Y, np.nan)), "main"))
+            m = mid & (np.arange(len(X)) % 2 == 0)
+            out.append(("iso_points", (np.where(m, X, np.nan), np.where(m, Y, np.nan)), "main"))
+            out.append(("iso", (np.where(dim, X, np.nan), np.where(dim, Y, np.nan)), "aux"))
+        # Hot clumps: short thick arcs, brightest on the approaching side (one call for all).
+        arc = np.linspace(-0.16, 0.16, 10)
+        arc[-1] = np.nan  # pen up between arcs
+        dr = np.array([-0.07, 0.0, 0.07])
+        rr = (self.clump_r[:, None, None] + dr[None, :, None]) * np.ones_like(arc)
+        pp = self.clump_phi[:, None, None] + np.nan_to_num(arc, nan=0.0) * np.ones((1, 3, 1))
+        X, Y, g = project(rr.ravel(), pp.ravel(), tilt)
+        cut = np.tile(np.isnan(arc), len(self.clump_r) * 3)
+        X, Y = np.where(cut, np.nan, X), np.where(cut, np.nan, Y)
+        hot_c = np.repeat(g.reshape(-1, 10).mean(axis=1) > 0.85, 10)
+        out.append(("iso", (np.where(hot_c, X, np.nan), np.where(hot_c, Y, np.nan)), "main"))
+        out.append(("iso", (np.where(~hot_c, X, np.nan), np.where(~hot_c, Y, np.nan)), "aux"))
+        # Gas spiraling in.
+        X, Y, g = project(self.gas_r, self.gas_phi, tilt)
+        out.append(("iso_points", (np.where(g > 0.85, X, np.nan), np.where(g > 0.85, Y, np.nan)), "main"))
+        out.append(("iso_points", (np.where(g <= 0.85, X, np.nan), np.where(g <= 0.85, Y, np.nan)), "aux"))
+        # Everything above is in r_s on the sky; scale it and center the picture.
+        out = [(k, (np.asarray(v[0]) / SCALE, (np.asarray(v[1]) - OFFSET) / SCALE), st) for k, v, st in out]
+        # The stage's own drawing and you, already in scene units around the hole.
+        extra = self.overlay()
         x, y = self.you()
-        out.append(("iso", dot(math.atan2(float(x), float(y)), float(math.hypot(x, y)), 0.035), "main"))
-        return out
+        extra.append(("iso", dot(math.atan2(float(x), float(y)), float(math.hypot(x, y)), 0.035), "main"))
+        out += [(k, (np.asarray(v[0]), np.asarray(v[1]) - OFFSET / SCALE), st) for k, v, st in extra]
+        return _batch(out)
 
     def overlay(self) -> list:
         return []
 
     def tau_text(self) -> str:
         return f"τ left {self.tau_left:.1f} s" if self.tau_left >= 0.1 else f"τ left {self.tau_left * 1000:.1f} ms"
+
+
+def _batch(layers: list) -> list:
+    """Join layers of the same kind and style into one, with NaN between them, so the
+    renderer draws a few long polylines instead of many short ones."""
+    groups: dict[tuple[str, str], list] = {}
+    for kind, (x, y), style in layers:
+        groups.setdefault((kind, style), []).append((np.ravel(x), np.ravel(y)))
+    out = []
+    gap = np.array([np.nan])
+    for (kind, style), parts in groups.items():
+        xs = np.concatenate([np.concatenate([x, gap]) for x, _ in parts])
+        ys = np.concatenate([np.concatenate([y, gap]) for _, y in parts])
+        out.append((kind, (xs, ys), style))
+    order = {"aux": 0, "main": 1}
+    return sorted(out, key=lambda layer: order.get(layer[2], 0))
 
 
 def _frac(x):

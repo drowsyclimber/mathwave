@@ -55,7 +55,16 @@ The third page follows the "Falling into a black hole: your last 67 seconds, as 
 
 ![mathwave black hole page](docs/mathwave-blackhole.png)
 
-The black hole is real optics, simplified. The accretion disk is drawn as rings from the innermost stable orbit (3 r_s) outward, and every point is moved to where its light lands on the sky using Beloborodov's light-bending approximation, 1 − cos α = (1 − cos ψ)(1 − r_s/r). That is what lifts the far side of the disk into the arc over the top. The side of the disk orbiting toward you is drawn bright, from the Doppler and gravitational shift at that radius, and the ring at (√27/2)·r_s is the photon ring at the edge of the shadow. The music ripples the disk, with each ring turning at its own orbital speed. Each panel adds its own overlay: trapped rings of light for SOS, an engine plume, tidal deformation of a ring of particles, your head and feet pulling apart.
+The black hole is real optics, simplified. The accretion disk is drawn as rings from the innermost stable orbit (3 r_s) outward, and every point is moved to where its light lands on the sky using Beloborodov's light-bending approximation, 1 − cos α = (1 − cos ψ)(1 − r_s/r). That is what lifts the far side of the disk into the arc over the top. The side of the disk orbiting toward you is drawn bright, from the Doppler and gravitational shift at that radius, and the ring at (√27/2)·r_s is the photon ring at the edge of the shadow. The disk is drawn at three brightness levels from that shift, with more rings in the full-screen views than in the grid.
+
+It moves the whole time:
+
+- Hot clumps orbit the disk, inner ones faster than outer ones, as Kepler's law says, and their light follows the same bent paths, so a clump going behind the hole rides up over the top.
+- Gas spirals in from the outer edge, drifts slowly while it is outside the innermost stable orbit, then plunges once it passes 3 r_s.
+- Background stars drift behind the hole and are bent by it, each showing as two images from the point-lens equation β = θ − θ_E²/θ, so they slide around the shadow as they pass.
+- The photon ring flares on every kick, the spectrum ripples each ring at its own orbital speed, and the view sways a degree or two.
+
+The music sets the speed of all of this, so time in the picture is not to scale: a real orbit at 3 r_s around Sagittarius A* takes about half an hour. Each panel adds its own overlay: trapped rings of light for SOS, an engine plume, tidal deformation of a ring of particles, your head and feet pulling apart. The black hole takes 60% of each panel in the grid and two thirds of the full-screen view.
 
 The fall is real too. A body dropped from rest at the horizon follows the cycloid r = r_s·cos²(η/2), τ = (GM/c³)(η + sin η). For Sagittarius A* at 4.297 million suns that takes πGM/c³ = 66.5 s, the longest anyone can last inside, which is where the reel's 67 seconds comes from. Every panel runs that clock in real time, so the countdown, your radius and the tide on a 2 m body (Δa = 2GM·L/r³) are the actual values at that moment.
 

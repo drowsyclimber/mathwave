@@ -578,11 +578,11 @@ class Renderer:
         full_aux = np.zeros((gh, gw), dtype=bool)
         g_main, g_aux = full_main, full_aux
         # Panels with a scene (the black hole page) draw it above their trace, in the same grid.
-        split = 0.0 if plot_h_used else getattr(panel, "scene_split", 0.0)
+        split = 0.0 if plot_h_used else getattr(panel, "scene_split_focus" if focus else "scene_split", 0.0)
         scene_rows = int(round(plot_h * split)) if split and plot_h >= 5 else 0
         if scene_rows:
             sm, sa = full_main[: scene_rows * 4], full_aux[: scene_rows * 4]
-            for kind, val, style in panel.scene():
+            for kind, val, style in panel.scene(scene_rows * 4, gw):
                 plot_iso(sm if style == "main" else sa, val[0], val[1], connect=kind == "iso")
             g_main, g_aux = full_main[scene_rows * 4 :], full_aux[scene_rows * 4 :]
         for layer in ([] if plot_h_used else panel.layers(x)):
