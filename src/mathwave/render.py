@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import textwrap
 from dataclasses import dataclass
 
 import numpy as np
@@ -14,6 +15,9 @@ import colorsys
 from .controls import Hit, fmt
 from .dsp import BANDS, FEATURE_INFO, Features
 from .panels import Panel
+
+# Badge colors on the black hole page: real law, real quantity inside a sound choice, sound design.
+VERDICT_RGB = {"PHYSICS": (110, 230, 140), "MIXED": (245, 195, 90), "METAPHOR": (190, 160, 255)}
 
 RESET = "\x1b[0m"
 
@@ -523,6 +527,10 @@ class Renderer:
             scr.text(rr, c0, "│", border)
             scr.text(rr, c0 + w - 1, "│", border)
         scr.text(r0 + h - 1, c0, "╰" + "─" * (w - 2) + "╯", border)
+        verdict = getattr(panel, "verdict", "")
+        if verdict and w >= len(verdict) + 8:
+            tag = f" {verdict} "
+            scr.text(r0 + h - 1, c0 + w - 2 - len(tag), tag, S.get(VERDICT_RGB.get(verdict, (200, 200, 200)), bold=True))
 
         meter_w = 8 if w >= 40 else 0
         label = f" {idx + 1} {panel.title} "
@@ -544,10 +552,13 @@ class Renderer:
         if footer >= 1:
             lines.append((panel.live(), main))
         if focus:
-            lines += [("", sub), ("sound: " + panel.sound, sub), ("drive: " + drive_label(panel.drive, f)
-                      + f"   level {panel.level:.2f}", sub)]
+            lines += [("", sub)] + [(line, sub) for line in textwrap.wrap("sound: " + panel.sound, max(20, inner_w))[:2]]
+            lines.append(("drive: " + drive_label(panel.drive, f) + f"   level {panel.level:.2f}", sub))
             tuned = panel.tuning_summary()
             lines.append(("tuned: " + tuned if tuned else "tuned: defaults (add a [tune." + panel.key + "] section)", sub))
+            if verdict and getattr(panel, "truth", ""):
+                wrapped = textwrap.wrap(f"physics check, {verdict}: {panel.truth}", max(20, inner_w))
+                lines += [(line, sub) for line in wrapped[:3]]
         plot_h = h - 2 - len(lines) - (1 if lines else 0)
         while plot_h < 2 and lines:
             lines.pop(1 if len(lines) > 1 else 0)
@@ -563,8 +574,17 @@ class Renderer:
             plot_h_used = 0
         gh, gw = plot_h * 4, pw * 2
         x = np.linspace(panel.domain[0], panel.domain[1], gw)
-        g_main = np.zeros((gh, gw), dtype=bool)
-        g_aux = np.zeros((gh, gw), dtype=bool)
+        full_main = np.zeros((gh, gw), dtype=bool)
+        full_aux = np.zeros((gh, gw), dtype=bool)
+        g_main, g_aux = full_main, full_aux
+        # Panels with a scene (the black hole page) draw it above their trace, in the same grid.
+        split = 0.0 if plot_h_used else getattr(panel, "scene_split", 0.0)
+        scene_rows = int(round(plot_h * split)) if split and plot_h >= 5 else 0
+        if scene_rows:
+            sm, sa = full_main[: scene_rows * 4], full_aux[: scene_rows * 4]
+            for kind, val, style in panel.scene():
+                plot_iso(sm if style == "main" else sa, val[0], val[1], connect=kind == "iso")
+            g_main, g_aux = full_main[scene_rows * 4 :], full_aux[scene_rows * 4 :]
         for layer in ([] if plot_h_used else panel.layers(x)):
             kind, val, style = layer
             g = g_main if style == "main" else g_aux
@@ -583,7 +603,7 @@ class Renderer:
             elif kind == "iso_points":
                 plot_iso(g, val[0], val[1], connect=False)
         if not plot_h_used:
-            cm, ca = braille_codes(g_main), braille_codes(g_aux)
+            cm, ca = braille_codes(full_main), braille_codes(full_aux)
             both = cm | ca
             ch = np.where(both > 0, 0x2800 + both, 32).astype(np.uint32)
             st = np.where(cm > 0, main, np.where(ca > 0, aux, 0)).astype(np.uint16)

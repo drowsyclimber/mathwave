@@ -1,4 +1,4 @@
-.TH MATHWAVE 1 "November 2026" "mathwave 0.5.0" "User Commands"
+.TH MATHWAVE 1 "November 2026" "mathwave 0.6.0" "User Commands"
 .SH NAME
 mathwave \- terminal audio visualizer that drives a grid of math functions
 .SH SYNOPSIS
@@ -33,12 +33,13 @@ Play the built-in demo track, in which every sound is generated from a formula.
 With \-\-demo, also send the track to your speakers.
 .TP
 .BI \-\-panels " LIST"
-Comma-separated panel keys, for example 808,reese,tan,spectrum. The group names math and
-cern stand for every built-in math panel and the eleven CERN panels. Replaces the pages
+Comma-separated panel keys, for example 808,reese,tan,spectrum. The group names math,
+cern and hole stand for every built-in math panel, the eleven CERN panels and the ten
+black hole panels. Replaces the pages
 setting with this list plus the other group.
 .TP
 .BI \-\-page " N"
-Start on page N. Page 2 is the CERN page by default.
+Start on page N. By default page 2 is the CERN page and page 3 the black hole page.
 .TP
 .BI \-\-layout " auto|COLSxROWS"
 Grid layout.
@@ -105,7 +106,8 @@ Config file. Default: $XDG_CONFIG_HOME/mathwave/config.
 Show that panel full screen with its formula, sound and drive (0 is panel 10). Press the same key again or g to return to the grid.
 .TP
 .B n, N
-Next or previous page. By default page 1 is the panels line and page 2 is the CERN page.
+Next or previous page. By default page 1 is the panels line, page 2 the CERN page and
+page 3 the black hole page.
 .TP
 .B ". ,"
 Focus the next or previous panel, which reaches panel 11 and beyond.
@@ -233,9 +235,22 @@ with real accelerator numbers:
 .B higgs
 (a diphoton mass histogram whose 125 GeV bump grows with its significance).
 Every one has knobs, listed by \-\-list\-knobs, and works in tune mode.
+.SH BLACK HOLE PAGE
+Ten panels for your last 66.5 seconds inside Sagittarius A*. Each draws a simulated black
+hole above its trace: disk rings from 3 r_s outward, bent onto the sky with Beloborodov's
+approximation 1 \- cos \(*a = (1 \- cos \(*q)(1 \- r_s/r) so the far side arcs over the top,
+the approaching side bright from its Doppler shift, and the photon ring at
+(\(sr27/2)\(md r_s. The fall is the cycloid r = r_s cos\u2\d(\(*y/2), which lasts \(*pGM/c\u3\d =
+66.5 s for 4.297 million suns, and every panel runs it in real time.
+.PP
+Each panel is labeled on its bottom border. PHYSICS: the formula is a real law (singular).
+MIXED: a real quantity is inside a sound choice (horizon, light, tides, headfeet,
+spaghetti). METAPHOR: the formula is sound design and only the caption is physics (sos,
+engines, noway, crush). The focus view prints a physics check that says which part is
+which, and so does \-\-formulas. Every panel has mass (millions of suns) and tilt knobs.
 .PP
 In [general],
-.B pages = math | cern
+.B pages = math | cern | hole
 sets the pages n flips through; separate pages with | and panels with commas.
 .SH FREQUENCIES
 .TP

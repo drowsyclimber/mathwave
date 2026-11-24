@@ -19,6 +19,7 @@ from .audio import DemoSource, build_source
 from .config import Config, check_fft_size, default_path, load
 from .controls import Hit, Mouse, SliderBank, TuneSession, parse_input, slider_usage, state_path
 from .dsp import BANDS, FEATURE_INFO, Analyzer, Features
+from .blackhole import HOLE
 from .cern import CERN
 from .panels import BUILTIN, COMMON_KEYS, DEFAULT_ORDER, GROUPS, Controls, expand, inline_bands, make_panels
 from .render import DYNAMIC_THEMES, THEMES, Renderer, drive_label
@@ -27,7 +28,7 @@ THEME_ORDER = list(THEMES) + DYNAMIC_THEMES
 KEY_HELP = [
     ("1-9, 0", "show that panel full screen (0 is panel 10); the same key again or g returns"),
     (". ,", "focus the next or previous panel (reaches panel 11 and beyond)"),
-    ("n, N", "next or previous page: the math panels and the CERN page"),
+    ("n, N", "next or previous page: the math panels, the CERN page and the black hole page"),
     ("k", "tune mode: the focused panel's settings as sliders (opens panel 1 from the grid)"),
     ("c", "full-screen controls: your [slider.*] values"),
     ("↑ ↓, Tab", "pick a slider (in tune mode, the controls view or a controls panel)"),
@@ -69,7 +70,7 @@ def parse_args(argv=None):
     ap.add_argument("--fft-size", type=int, help="FFT size: 1024, 2048 (default), 4096, 8192 or 16384")
     ap.add_argument("--bpm", help="fixed tempo, or auto to detect it from kicks")
     ap.add_argument("--focus", type=int, help="start with panel N full screen")
-    ap.add_argument("--page", type=int, help="start on page N (n flips pages; page 2 is CERN by default)")
+    ap.add_argument("--page", type=int, help="start on page N (n flips pages; by default 2 is CERN, 3 is the black hole)")
     ap.add_argument("--meters", action="store_true", help="start in the live meter view")
     ap.add_argument("--controls", action="store_true", help="start in the full-screen controls view")
     ap.add_argument("--tune", action="store_true", help="start in tune mode (on --focus N, or panel 1)")
@@ -142,12 +143,16 @@ def build_panels(cfg: Config):
 
 
 def page_list(cfg: Config) -> list[list[str]]:
-    """The pages n flips through: [general] pages, or the panels plus the other built-in group."""
+    """The pages n flips through: [general] pages, or the panels line followed by the
+    other built-in pages (math, cern, hole)."""
     if cfg.pages:
         return cfg.pages
     first = expand(cfg.panels)
-    other = GROUPS["cern"] if first != GROUPS["cern"] else GROUPS["math"]
-    return [cfg.panels, other]
+    groups = [GROUPS[g] for g in ("math", "cern", "hole")]
+    others = [g for g in groups if g != first]
+    if first not in groups:  # your own panels line stands in for the math page
+        others = others[1:]
+    return [cfg.panels] + others
 
 
 def build_pages(cfg: Config) -> tuple[Analyzer, list[list]]:
@@ -171,7 +176,7 @@ def build(cfg: Config) -> tuple[Analyzer, list]:
 
 
 def print_knobs(cfg: Config, which: str) -> int:
-    panels = [cls(cfg.names) for cls in BUILTIN + CERN] + list(cfg.custom.values())
+    panels = [cls(cfg.names) for cls in BUILTIN + CERN + HOLE] + list(cfg.custom.values())
     if which != "all":
         panels = [p for p in panels if p.key == which]
         if not panels:
@@ -239,6 +244,8 @@ def print_formulas(panels, f: Features | None = None) -> None:
         if p.tuning_summary():
             print(f"   tuned: {p.tuning_summary()}")
         print(f"   sounds like: {p.sound}")
+        if getattr(p, "verdict", ""):
+            print(f"   physics check: {p.verdict}. {p.truth}")
         print()
 
 
@@ -778,6 +785,10 @@ def main(argv=None) -> int:
         print("CERN page (panels = cern):")
         for cls in CERN:
             print(f"{cls.key:10s} {cls.title}")
+        print()
+        print("Black hole page (panels = hole):")
+        for cls in HOLE:
+            print(f"{cls.key:10s} {cls.title}  [{cls.verdict}]")
         print()
         for k, p in cfg.custom.items():
             print(f"{k:10s} {p.title} (config)")

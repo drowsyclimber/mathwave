@@ -10,6 +10,8 @@ Press `n` for a second page, [the CERN page](#the-cern-page): eleven panels that
 
 [![mathwave CERN page](docs/mathwave-cern.png)](#the-cern-page)
 
+Press `n` again for [the black hole page](#the-black-hole-page): your last 66.5 seconds inside Sagittarius A*, with a lensed black hole drawn over every formula and each panel labeled PHYSICS, MIXED or METAPHOR.
+
 ## Panels
 
 | # | Key | Formula plotted | Driven by |
@@ -47,16 +49,49 @@ Press `n` for a second page: eleven panels that follow a proton through the LHC,
 
 The ring panels draw on a square grid, so circles stay round at any terminal size. Every CERN panel has knobs and works in tune mode like the math panels; `mathwave --list-knobs rf` (or any key) lists them.
 
-Pages are configurable. By default page 1 is your `panels` line and page 2 is whichever built-in group it is not. To set your own:
+## The black hole page
+
+The third page follows the "Falling into a black hole: your last 67 seconds, as math" reel. Each panel has a simulated black hole on top and the stage's formula drawn as a trace underneath, the way the reel stacks its image over its trajectory display.
+
+![mathwave black hole page](docs/mathwave-blackhole.png)
+
+The black hole is real optics, simplified. The accretion disk is drawn as rings from the innermost stable orbit (3 r_s) outward, and every point is moved to where its light lands on the sky using Beloborodov's light-bending approximation, 1 − cos α = (1 − cos ψ)(1 − r_s/r). That is what lifts the far side of the disk into the arc over the top. The side of the disk orbiting toward you is drawn bright, from the Doppler and gravitational shift at that radius, and the ring at (√27/2)·r_s is the photon ring at the edge of the shadow. The music ripples the disk, with each ring turning at its own orbital speed. Each panel adds its own overlay: trapped rings of light for SOS, an engine plume, tidal deformation of a ring of particles, your head and feet pulling apart.
+
+The fall is real too. A body dropped from rest at the horizon follows the cycloid r = r_s·cos²(η/2), τ = (GM/c³)(η + sin η). For Sagittarius A* at 4.297 million suns that takes πGM/c³ = 66.5 s, the longest anyone can last inside, which is where the reel's 67 seconds comes from. Every panel runs that clock in real time, so the countdown, your radius and the tide on a 2 m body (Δa = 2GM·L/r³) are the actual values at that moment.
+
+Every panel carries a label on its bottom border, and its focus view (`1`–`9`, `0`) says which part is which:
+
+- PHYSICS: the formula is a real law.
+- MIXED: a real quantity is inside it, but turning it into sound is a design choice.
+- METAPHOR: the formula is sound design, and only the caption's physics is real.
+
+| # | Key | Formula | Label | What is real |
+|---|-----|---------|-------|--------------|
+| 1 | `horizon` | `y = 3e^(−4{x})·sin(2π∫f₀·r/r_s dτ)` | MIXED | at this horizon you feel about 1e-4 g, and r = 0 is at most 66.5 s away; pitch ∝ r/r_s is made up |
+| 2 | `sos` | `yₖ = bₖ + 2^(−k/2)·SOS(x − 3k/4)·(1 + ⅕sin(32πx/2ᵏ))` | METAPHOR | inside the horizon even outward light moves to smaller r, so no call gets out; SOS() is a Morse gate |
+| 3 | `light` | `y = (1+n)e^(−2.2{4x})·cos(2π·f/f₀·{4x})`, `f/f₀ = cot(η/2)` | MIXED | η is the real cycloid angle and cot(η/2) = √(r/(r_s − r)); using it as pitch is made up |
+| 4 | `engines` | `y = E·[sin ωx + sin(3ωx/2) + ⅗sin 2ωx]` | METAPHOR | no burn stops the fall, and burning shortens your time; the chord is additive synthesis |
+| 5 | `noway` | `y = 3e^(−1.3(x−x₀))·cos 3π(x−x₀) → 0` | METAPHOR | inside, r works like time, so r = 0 is in every future |
+| 6 | `tides` | `y = A(Δa)·sin(2π(τ₀ − τ(x)))` | MIXED | your proper time left and the tide 2GM·L/r³ are exact; the amplitude curve is a choice |
+| 7 | `headfeet` | `y_feet(x) = y_head(x + g/4) at f/2`, `g = 2·log₁₀(Δa/0.01 g)` | MIXED | your feet are deeper, pulled harder, and get there first |
+| 8 | `crush` | `y = (1 − d·e^(−5{x}))·sin 8πx` | METAPHOR | tides squeeze your sides with half the stretching force; d is sidechain ducking |
+| 9 | `spaghetti` | `y = sin(2π∫5/s(x) dx)`, `s = 1 + (3/2)·log₁₀(Δa/1 g)` | MIXED | the tide on a 2 m body reaches 1 g only 615,000 km from the center, 0.3 s before the end |
+| 10 | `singular` | `y = 3(1 − x/x₀)^(2/3)·sin 8πx → 0` | PHYSICS | near r = 0 a free fall obeys r ∝ (τ₀ − τ)^(2/3); the dim curve is the exact cycloid r(τ) |
+
+On the panels that use Δa (`headfeet`, `crush`, `spaghetti`), the music picks how deep you are: quiet is the horizon's 1e-4 g, loud is 10,000 g, and the live line shows the radius where the tide really is that strong. Every panel has `mass` (millions of suns) and `tilt` (the view of the disk) knobs, so `mass = 1` under `[tune.singular]` gives a 15.5-second fall.
+
+## Pages
+
+Pages are configurable. By default page 1 is your `panels` line, then the CERN page and the black hole page (or the math page, if your `panels` line is one of the groups). To set your own:
 
 ```ini
 [general]
-pages = math | cern
+pages = math | cern | hole
 # or mix them: two groups and some single panels
 # pages = 808, sinc, bell | rf, bend, gamma, ramp | collide, higgs
 ```
 
-`math` and `cern` work as group names anywhere a panel list is expected, so `mathwave --panels cern` shows only the CERN page.
+`math`, `cern` and `hole` work as group names anywhere a panel list is expected, so `mathwave --panels hole` shows only the black hole page.
 
 ## Install
 
@@ -80,6 +115,7 @@ mathwave --demo --audible     # play the built-in track (every sound is a formul
 mathwave --panels 808,dive,reese,tan --layout 2x2
 mathwave --focus 3            # start with the Reese panel full screen
 mathwave --page 2             # start on the CERN page
+mathwave --page 3             # start on the black hole page
 mathwave --panels cern        # only the CERN page
 mathwave --formulas           # print every formula, its drive and what it sounds like
 mathwave --list-features      # every band and feature you can drive a panel with
@@ -97,7 +133,7 @@ Keys (also `mathwave --keys`):
 | Key | Does |
 |---|---|
 | `1`–`9`, `0` | full-screen a panel (shows the sound, drive and tuning too); `0` is panel 10; the same key again or `g` returns |
-| `n` / `N` | next or previous page (the math panels and the CERN page) |
+| `n` / `N` | next or previous page (the math panels, the CERN page and the black hole page) |
 | `.` / `,` | focus the next or previous panel, so you can reach panel 11 and beyond |
 | `k` | tune mode: the focused panel's settings as sliders (from the grid it opens panel 1) |
 | `c` | full-screen controls: your `[slider.*]` values |

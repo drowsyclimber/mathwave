@@ -224,11 +224,13 @@ def test_groups_expand():
     assert expand(["808", "cern", "higgs"]) == ["808"] + GROUPS["cern"] + ["higgs"]
 
 
-def test_default_pages_are_math_then_cern():
+def test_default_pages_are_math_then_cern_then_hole():
     cfg = load(SHIPPED)
-    assert page_list(cfg) == [cfg.panels, GROUPS["cern"]]
+    assert page_list(cfg) == [cfg.panels, GROUPS["cern"], GROUPS["hole"]]
     cfg.panels = list(GROUPS["cern"])
-    assert page_list(cfg)[1] == GROUPS["math"]
+    assert page_list(cfg) == [GROUPS["cern"], GROUPS["math"], GROUPS["hole"]]
+    cfg.panels = ["hole"]
+    assert page_list(cfg) == [["hole"], GROUPS["math"], GROUPS["cern"]]
 
 
 def test_pages_config_line(tmp_path):
@@ -239,17 +241,19 @@ def test_pages_config_line(tmp_path):
 
 def test_n_flips_pages_and_status_shows_it(tmp_path):
     app, _ = make_app(tmp_path)
-    assert len(app.pages) == 2 and app.page == 0
-    assert "page 1/2" in plain(app.draw(168, 50, "demo"))[0]
+    assert len(app.pages) == 3 and app.page == 0
+    assert "page 1/3" in plain(app.draw(168, 50, "demo"))[0]
     app.key("2", 0)
     app.key("n", 0)
     assert app.page == 1 and app.focus is None
     assert [p.key for p in app.panels] == GROUPS["cern"]
     run(app, 5)
     text = "\n".join(plain(app.draw(168, 50, "demo")))
-    assert "page 2/2" in text and "11 Higgs" in text
+    assert "page 2/3" in text and "11 Higgs" in text
     app.key("N", 0)
     assert app.page == 0
+    app.key("N", 0)
+    assert app.page == 2 and app.panels[0].key == "horizon"
 
 
 def test_dot_and_comma_reach_panel_eleven(tmp_path):
@@ -279,11 +283,11 @@ def test_page_flag_and_panels_flag(tmp_path):
     out = subprocess.run([sys.executable, "-m", "mathwave", "-p", path, "--page", "2", "--dump", "20",
                           "--size", "168x50", "--no-color"], capture_output=True, text=True, env=env,
                          check=True).stdout
-    assert "page 2/2" in out and "squeeze" in out
+    assert "page 2/3" in out and "squeeze" in out
     out = subprocess.run([sys.executable, "-m", "mathwave", "-p", path, "--panels", "cern", "--dump", "5",
                           "--size", "168x50", "--no-color"], capture_output=True, text=True, env=env,
                          check=True).stdout
-    assert "page 1/2" in out and "1 RF kick" in out
+    assert "page 1/3" in out and "1 RF kick" in out
     out = subprocess.run([sys.executable, "-m", "mathwave", "-p", path, "--page", "2", "--formulas"],
                          capture_output=True, text=True, env=env, check=True).stdout
     assert "σ* = √(εβ*)" in out and "m_H = 125 GeV" in out
