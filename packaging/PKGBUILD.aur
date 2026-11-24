@@ -1,6 +1,6 @@
 # Maintainer: Mike Falls <96034740+drowsyclimber@users.noreply.github.com>
 pkgname=mathwave
-pkgver=0.4.0
+pkgver=0.5.0
 pkgrel=1
 pkgdesc="Cava-style terminal audio visualizer that drives a grid of math functions and prints their formulas"
 arch=('any')
@@ -16,7 +16,7 @@ optdepends=(
 )
 # AUR build from the tagged GitHub release.
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('4bf44d454300dd8b2cae87535fb14474ca8c821eba03622947a86da2c0a3c536')
+sha256sums=('056567ab03464f80be253e6cf3eb401e210ed9a7c1f0bcb6c1d081f6d249b99b')
 
 build() {
   cd "$pkgname-$pkgver"
