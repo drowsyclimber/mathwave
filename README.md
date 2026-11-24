@@ -6,6 +6,10 @@ The idea comes from the "math functions that go hard" reels: an 808 from an expo
 
 ![mathwave grid](docs/mathwave-grid.png)
 
+Press `n` for a second page, [the CERN page](#the-cern-page): eleven panels that follow a proton through the LHC, from the first RF kick to the 125 GeV Higgs bump.
+
+[![mathwave CERN page](docs/mathwave-cern.png)](#the-cern-page)
+
 ## Panels
 
 | # | Key | Formula plotted | Driven by |
@@ -26,7 +30,6 @@ Each panel's title bar has a level meter for its drive signal. Dim curves are gu
 
 Press `n` for a second page: eleven panels that follow a proton through the LHC, stage by stage, the way the "POV: you're a proton inside CERN" reel does. Every number on it is a real accelerator number, worked out live from the formula.
 
-![mathwave CERN page](docs/mathwave-cern.png)
 
 | # | Key | Stage | Formula | Driven by | What moves |
 |---|-----|-------|---------|-----------|------------|
