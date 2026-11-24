@@ -898,18 +898,17 @@ def make_panels(keys: list[str], custom: dict[str, ExprPanel] | None = None,
     known = set(BY_KEY) | set(custom)
     for k in tune:
         if k not in known or k == "controls":
-            raise SystemExit(f"mathwave: [tune.{k}] does not match any panel. Panels: {', '.join(DEFAULT_ORDER + list(custom))}")
+            raise SystemExit(f"mathwave: [tune.{k}] does not match any panel. Panels: "
+                             f"{', '.join(DEFAULT_ORDER + GROUPS['cern'] + list(custom))}")
     out = []
-    for k in keys:
-        k = k.strip()
-        if not k:
-            continue
+    for k in expand(keys):
         if k in custom:
             p = custom[k]
         elif k in BY_KEY:
             p = BY_KEY[k](names)
         else:
-            raise SystemExit(f"mathwave: unknown panel '{k}'. Built-in panels: {', '.join(DEFAULT_ORDER + ['controls'])}")
+            raise SystemExit(f"mathwave: unknown panel '{k}'. Built-in panels: {', '.join(DEFAULT_ORDER + ['controls'])}; "
+                             f"CERN page: {', '.join(GROUPS['cern'])}; groups: math, cern")
         try:
             p.configure(tune.get(k, {}), base)
         except (ValueError, SyntaxError) as exc:
@@ -923,4 +922,20 @@ def inline_bands(panels: list[Panel]) -> dict[str, tuple[float, float, str]]:
     out: dict[str, tuple[float, float, str]] = {}
     for p in panels:
         out.update(p.inline)
+    return out
+
+
+# Named panel groups. cern.py adds "cern" and its panels to BY_KEY when it loads.
+GROUPS: dict[str, list[str]] = {"math": list(DEFAULT_ORDER)}
+
+from . import cern as _cern  # noqa: E402,F401  (registers the CERN page's panels)
+
+
+def expand(keys: list[str]) -> list[str]:
+    """Panel keys with group names (math, cern) replaced by their panels."""
+    out: list[str] = []
+    for k in keys:
+        k = k.strip()
+        if k:
+            out += GROUPS.get(k, [k])
     return out

@@ -19,12 +19,15 @@ from .audio import DemoSource, build_source
 from .config import Config, check_fft_size, default_path, load
 from .controls import Hit, Mouse, SliderBank, TuneSession, parse_input, slider_usage, state_path
 from .dsp import BANDS, FEATURE_INFO, Analyzer, Features
-from .panels import BUILTIN, COMMON_KEYS, DEFAULT_ORDER, Controls, inline_bands, make_panels
+from .cern import CERN
+from .panels import BUILTIN, COMMON_KEYS, DEFAULT_ORDER, GROUPS, Controls, expand, inline_bands, make_panels
 from .render import DYNAMIC_THEMES, THEMES, Renderer, drive_label
 
 THEME_ORDER = list(THEMES) + DYNAMIC_THEMES
 KEY_HELP = [
     ("1-9, 0", "show that panel full screen (0 is panel 10); the same key again or g returns"),
+    (". ,", "focus the next or previous panel (reaches panel 11 and beyond)"),
+    ("n, N", "next or previous page: the math panels and the CERN page"),
     ("k", "tune mode: the focused panel's settings as sliders (opens panel 1 from the grid)"),
     ("c", "full-screen controls: your [slider.*] values"),
     ("↑ ↓, Tab", "pick a slider (in tune mode, the controls view or a controls panel)"),
@@ -66,6 +69,7 @@ def parse_args(argv=None):
     ap.add_argument("--fft-size", type=int, help="FFT size: 1024, 2048 (default), 4096, 8192 or 16384")
     ap.add_argument("--bpm", help="fixed tempo, or auto to detect it from kicks")
     ap.add_argument("--focus", type=int, help="start with panel N full screen")
+    ap.add_argument("--page", type=int, help="start on page N (n flips pages; page 2 is CERN by default)")
     ap.add_argument("--meters", action="store_true", help="start in the live meter view")
     ap.add_argument("--controls", action="store_true", help="start in the full-screen controls view")
     ap.add_argument("--tune", action="store_true", help="start in tune mode (on --focus N, or panel 1)")
@@ -102,6 +106,7 @@ def apply_args(cfg: Config, a) -> Config:
         cfg.fifo = a.fifo
     if a.panels:
         cfg.panels = [p.strip() for p in a.panels.split(",") if p.strip()]
+        cfg.pages = []
     if a.layout:
         cfg.layout = a.layout
     if a.theme:
@@ -136,6 +141,26 @@ def build_panels(cfg: Config):
     return make_panels(cfg.panels, cfg.custom, cfg.tune, names=cfg.names, smoothing=cfg.smoothing)
 
 
+def page_list(cfg: Config) -> list[list[str]]:
+    """The pages n flips through: [general] pages, or the panels plus the other built-in group."""
+    if cfg.pages:
+        return cfg.pages
+    first = expand(cfg.panels)
+    other = GROUPS["cern"] if first != GROUPS["cern"] else GROUPS["math"]
+    return [cfg.panels, other]
+
+
+def build_pages(cfg: Config) -> tuple[Analyzer, list[list]]:
+    """One analyzer for every page, with all their inline bands registered."""
+    pages = [make_panels(keys, cfg.custom, cfg.tune, names=cfg.names, smoothing=cfg.smoothing)
+             for keys in page_list(cfg)]
+    an = Analyzer(settings=cfg.analysis())
+    for panels in pages:
+        for name, (lo, hi, mode) in inline_bands(panels).items():
+            an.add_band(name, lo, hi, mode)
+    return an, pages
+
+
 def build(cfg: Config) -> tuple[Analyzer, list]:
     """The analysis pipeline and panels for a config, with inline band(lo, hi) registered."""
     panels = build_panels(cfg)
@@ -146,7 +171,7 @@ def build(cfg: Config) -> tuple[Analyzer, list]:
 
 
 def print_knobs(cfg: Config, which: str) -> int:
-    panels = [cls(cfg.names) for cls in BUILTIN] + list(cfg.custom.values())
+    panels = [cls(cfg.names) for cls in BUILTIN + CERN] + list(cfg.custom.values())
     if which != "all":
         panels = [p for p in panels if p.key == which]
         if not panels:
@@ -217,9 +242,12 @@ def print_formulas(panels, f: Features | None = None) -> None:
         print()
 
 
-def _status(src_name: str, f: Features, cfg: Config, note: str | None, paused: bool) -> str:
+def _status(src_name: str, f: Features, cfg: Config, note: str | None, paused: bool,
+            page: tuple[int, int] | None = None) -> str:
     tempo = f"BPM≈{f.bpm:.0f}" + ("" if f.tempo_source == "auto" else f" ({f.tempo_source})")
     parts = [f"input: {src_name}", tempo, f"gain {cfg.sensitivity:.2f}", f"theme {cfg.theme}"]
+    if page and page[1] > 1:
+        parts.append(f"page {page[0] + 1}/{page[1]}")
     if cfg.profile:
         parts.append(f"profile {cfg.profile}")
     if paused:
@@ -322,6 +350,7 @@ class App:
                  controls: bool = False, tune: bool = False, persist: bool = False):
         self.args = args
         self.persist = persist
+        self.page = max(0, (getattr(args, "page", None) or 1) - 1)
         self.focus, self.meters, self.controls = focus, meters, controls
         self.tune = None
         self.sessions: dict[str, TuneSession] = {}
@@ -342,19 +371,43 @@ class App:
 
     def _setup(self, cfg: Config, old_bank: SliderBank | None = None) -> None:
         self.cfg = cfg
-        self.an, self.panels = build(cfg)
+        self.an, self.pages = build_pages(cfg)
+        self.page = min(getattr(self, "page", 0), len(self.pages) - 1)
         self.bank = SliderBank(cfg.sliders, cfg.profile, state_path() if self.persist else None)
         if old_bank is not None and old_bank.profile == self.bank.profile:
             self.bank.adopt(old_bank)
-        for p in self.panels:
-            if isinstance(p, Controls):
-                p.bank = self.bank
+        for page in self.pages:
+            for p in page:
+                if isinstance(p, Controls):
+                    p.bank = self.bank
         self.rend = Renderer(cfg.theme, cfg.gradient, cfg.color_mode)
         self.footer = cfg.formulas
-        self.usage = slider_usage(self.panels, self.bank.names)
+        self.usage = slider_usage(self.all_panels, self.bank.names)
         self.sessions = {}
         if self.focus is not None and self.focus >= len(self.panels):
             self.focus = None
+
+    @property
+    def panels(self) -> list:
+        return self.pages[self.page]
+
+    @property
+    def all_panels(self) -> list:
+        seen, out = set(), []
+        for page in self.pages:
+            for p in page:
+                if id(p) not in seen:
+                    seen.add(id(p))
+                    out.append(p)
+        return out
+
+    def flip(self, delta: int = 1) -> None:
+        if len(self.pages) < 2:
+            self.note = "only one page (set pages = ... | ... under [general])"
+            return
+        self.page = (self.page + delta) % len(self.pages)
+        self.focus, self.tune = None, None
+        self.meters = self.controls = False
 
     def set_slider(self, item: str) -> None:
         name, _, value = item.partition("=")
@@ -411,7 +464,8 @@ class App:
     def draw(self, cols: int, rows: int, src_name: str, hints: bool = True) -> list[str]:
         tune = self.tune if self.focus is not None and not self.meters and not self.controls else None
         return self.rend.render(self.panels, self.f, cols, rows, layout=self.cfg.layout, footer=self.footer,
-                                focus=self.focus, status=_status(src_name, self.f, self.cfg, self.note, self.paused),
+                                focus=self.focus, status=_status(src_name, self.f, self.cfg, self.note, self.paused,
+                                              (self.page, len(self.pages))),
                                 hints=hints, meters=self.meters, bank=self.bank, tune=tune,
                                 controls=self.controls, usage=self.usage)
 
@@ -456,7 +510,7 @@ class App:
         self.note = f"wrote [{s.section_name}] to {path.replace(os.path.expanduser('~'), '~')}"
 
     def _tuned(self) -> None:
-        self.usage = slider_usage(self.panels, self.bank.names)
+        self.usage = slider_usage(self.all_panels, self.bank.names)
 
     def slider_mode(self) -> bool:
         if self.controls:
@@ -595,6 +649,17 @@ class App:
         elif k in ("g", "G"):
             self.focus, self.tune = None, None
             self.meters = self.controls = False
+        elif k in ("n", "N"):
+            self.flip(1 if k == "n" else -1)
+        elif k in (".", ","):
+            n = len(self.panels)
+            if self.focus is None:
+                self.focus = 0 if k == "." else n - 1
+            else:
+                self.focus = (self.focus + (1 if k == "." else -1)) % n
+            self.meters = self.controls = False
+            if self.tune is not None:
+                self.open_tune()
         elif k == "k":
             if self.tune is not None:
                 self.tune = None
@@ -708,13 +773,19 @@ def main(argv=None) -> int:
     if a.list_panels:
         for cls in BUILTIN:
             print(f"{cls.key:10s} {cls.title}")
+        print("controls   your [slider.*] values")
+        print()
+        print("CERN page (panels = cern):")
+        for cls in CERN:
+            print(f"{cls.key:10s} {cls.title}")
+        print()
         for k, p in cfg.custom.items():
             print(f"{k:10s} {p.title} (config)")
         return 0
     if a.formulas:
-        an, panels = build(cfg)
+        an, pages = build_pages(cfg)
         f = an.analyze(np.zeros(an.need), 0.0)
-        print_formulas(panels, f)
+        print_formulas(pages[min(len(pages), max(1, a.page or 1)) - 1], f)
         return 0
     if a.render_wav:
         synth.write_wav(a.render_wav, a.seconds, cfg.rate)

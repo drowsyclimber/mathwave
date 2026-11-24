@@ -1,4 +1,4 @@
-.TH MATHWAVE 1 "November 2026" "mathwave 0.4.0" "User Commands"
+.TH MATHWAVE 1 "November 2026" "mathwave 0.5.0" "User Commands"
 .SH NAME
 mathwave \- terminal audio visualizer that drives a grid of math functions
 .SH SYNOPSIS
@@ -33,7 +33,12 @@ Play the built-in demo track, in which every sound is generated from a formula.
 With \-\-demo, also send the track to your speakers.
 .TP
 .BI \-\-panels " LIST"
-Comma-separated panel keys, for example 808,reese,tan,spectrum.
+Comma-separated panel keys, for example 808,reese,tan,spectrum. The group names math and
+cern stand for every built-in math panel and the eleven CERN panels. Replaces the pages
+setting with this list plus the other group.
+.TP
+.BI \-\-page " N"
+Start on page N. Page 2 is the CERN page by default.
 .TP
 .BI \-\-layout " auto|COLSxROWS"
 Grid layout.
@@ -98,6 +103,12 @@ Config file. Default: $XDG_CONFIG_HOME/mathwave/config.
 .TP
 .B 1\-9, 0
 Show that panel full screen with its formula, sound and drive (0 is panel 10). Press the same key again or g to return to the grid.
+.TP
+.B n, N
+Next or previous page. By default page 1 is the panels line and page 2 is the CERN page.
+.TP
+.B ". ,"
+Focus the next or previous panel, which reaches panel 11 and beyond.
 .TP
 .B k
 Tune mode: the focused panel's drive, level shaping, smoothing and formula knobs as
@@ -196,6 +207,36 @@ panel's params can use, [tune.NAME] can set and tune mode shows.
 .TP
 .B mouse
 on or off under [general] (default on).
+.SH CERN PAGE
+Eleven panels that follow a proton through the LHC, each plotting the physics of one stage
+with real accelerator numbers:
+.B rf
+(\(*DE = qV\d0\u cos \(*f, steps on the kick),
+.B bend
+(r = p/(qB) on the 25 m PS Booster ring, magnets from the spectrum),
+.B bunch
+(bunch splitting, 1 to 32 Gaussians),
+.B gamma
+(v = c\(sr(1 \- 1/\(*g\u2\d) and how far below c the proton is),
+.B cold
+(R = 0 below T_c; noisy passages quench the 1.9 K magnets),
+.B ramp
+(E = \(*gmc\u2\d from 450 GeV to 6.8 TeV, then a beam dump),
+.B beams
+(two rings from the left and right channels, E_cm = 2E = 13.6 TeV),
+.B squeeze
+(\(*s* = \(sr(\(*e\(*b*), the hourglass at the collision point),
+.B overlap
+(L \(pt e^(\-d\u2\d/4\(*s\u2\d)),
+.B collide
+(a new event with curling tracks on every kick or snare) and
+.B higgs
+(a diphoton mass histogram whose 125 GeV bump grows with its significance).
+Every one has knobs, listed by \-\-list\-knobs, and works in tune mode.
+.PP
+In [general],
+.B pages = math | cern
+sets the pages n flips through; separate pages with | and panels with commas.
 .SH FREQUENCIES
 .TP
 .B [bands]

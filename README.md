@@ -22,6 +22,39 @@ The idea comes from the "math functions that go hard" reels: an 808 from an expo
 
 Each panel's title bar has a level meter for its drive signal. Dim curves are guides: envelopes, asymptotes, the ideal saw, the logistic fixed point.
 
+## The CERN page
+
+Press `n` for a second page: eleven panels that follow a proton through the LHC, stage by stage, the way the "POV: you're a proton inside CERN" reel does. Every number on it is a real accelerator number, worked out live from the formula.
+
+![mathwave CERN page](docs/mathwave-cern.png)
+
+| # | Key | Stage | Formula | Driven by | What moves |
+|---|-----|-------|---------|-----------|------------|
+| 1 | `rf` | RF kick | `ΔE = qV₀·cos φ` | kick, with a little sub | energy climbs one step per cavity gap on the beat |
+| 2 | `bend` | the bend | `r = p / (qB)` | loudness | the PS Booster ring (r = 25 m); every magnet is a slice of the spectrum, and B follows p |
+| 3 | `bunch` | bunch splitting | `ρ(s) = Σₖ e^(−(s−sₖ)²/2σ²)` | mids | bunches around the ring double: 1, 2, 4 … 32 |
+| 4 | `gamma` | relativity | `v = c·√(1 − 1/γ²)` | loudness | β against log γ; the live line shows how far below c you are, 2.85 m/s at 6.8 TeV |
+| 5 | `cold` | colder than space | `R = 0 (T < T_c)` | noisiness (flatness) | 1.9 K NbTi magnets; hissy passages heat them past 9.2 K and they quench |
+| 6 | `ramp` | the ramp | `E = γmc²` | loudness | 450 GeV to 6.8 TeV, then a beam dump and a fresh fill |
+| 7 | `beams` | the other beam | `E_cm = 2E` | loudness, split by left and right channel | two counter-rotating rings; equal channels make 13.6 TeV |
+| 8 | `squeeze` | the squeeze | `σ* = √(εβ*)` | bass | the hourglass at the collision point narrows from β* = 11 m to 30 cm, about 10 µm across |
+| 9 | `overlap` | overlap | `L ∝ e^(−d²/4σ²)` | kick | two Gaussian bunches pulled together on every kick |
+| 10 | `collide` | collision | `E = mc²` | kick and snare | a new event on every hit: charged tracks curl in the field, sometimes two photons |
+| 11 | `higgs` | the Higgs | `m_H = 125 GeV` | loudness | a diphoton mass histogram fills up and the 125 GeV bump rises, with its significance in σ |
+
+The ring panels draw on a square grid, so circles stay round at any terminal size. Every CERN panel has knobs and works in tune mode like the math panels; `mathwave --list-knobs rf` (or any key) lists them.
+
+Pages are configurable. By default page 1 is your `panels` line and page 2 is whichever built-in group it is not. To set your own:
+
+```ini
+[general]
+pages = math | cern
+# or mix them: two groups and some single panels
+# pages = 808, sinc, bell | rf, bend, gamma, ramp | collide, higgs
+```
+
+`math` and `cern` work as group names anywhere a panel list is expected, so `mathwave --panels cern` shows only the CERN page.
+
 ## Install
 
 ```sh
@@ -43,6 +76,8 @@ mathwave                      # capture the default output's monitor, like cava
 mathwave --demo --audible     # play the built-in track (every sound is a formula) and watch it
 mathwave --panels 808,dive,reese,tan --layout 2x2
 mathwave --focus 3            # start with the Reese panel full screen
+mathwave --page 2             # start on the CERN page
+mathwave --panels cern        # only the CERN page
 mathwave --formulas           # print every formula, its drive and what it sounds like
 mathwave --list-features      # every band and feature you can drive a panel with
 mathwave --meters             # start in the live meter view
@@ -59,6 +94,8 @@ Keys (also `mathwave --keys`):
 | Key | Does |
 |---|---|
 | `1`–`9`, `0` | full-screen a panel (shows the sound, drive and tuning too); `0` is panel 10; the same key again or `g` returns |
+| `n` / `N` | next or previous page (the math panels and the CERN page) |
+| `.` / `,` | focus the next or previous panel, so you can reach panel 11 and beyond |
 | `k` | tune mode: the focused panel's settings as sliders (from the grid it opens panel 1) |
 | `c` | full-screen controls: your `[slider.*]` values |
 | `↑` `↓`, Tab | pick a slider |

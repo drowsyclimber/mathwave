@@ -198,6 +198,30 @@ def plot_points(grid: np.ndarray, y: np.ndarray, yrange: tuple[float, float]) ->
     grid[r[ok].astype(np.int64), cols] = True
 
 
+def plot_iso(grid: np.ndarray, xs, ys, connect: bool = True) -> None:
+    """Draw points with x and y in -1..1 on the same scale (circles stay round), centered.
+    Consecutive points are joined; NaN lifts the pen."""
+    h, w = grid.shape
+    rad = max(1.0, min(w, h) / 2.0 - 1.0)
+    px = (w - 1) / 2.0 + np.asarray(xs, dtype=np.float64) * rad
+    py = (h - 1) / 2.0 - np.asarray(ys, dtype=np.float64) * rad
+    if connect and len(px) > 1:
+        x0, y0, x1, y1 = px[:-1], py[:-1], px[1:], py[1:]
+        ok = np.isfinite(x0) & np.isfinite(y0) & np.isfinite(x1) & np.isfinite(y1)
+        x0, y0, x1, y1 = x0[ok], y0[ok], x1[ok], y1[ok]
+        if len(x0):
+            m = int(min(400, math.ceil(float(np.max(np.maximum(np.abs(x1 - x0), np.abs(y1 - y0)))))) + 1)
+            t = np.linspace(0.0, 1.0, max(2, m))
+            px = (x0[:, None] + (x1 - x0)[:, None] * t).ravel()
+            py = (y0[:, None] + (y1 - y0)[:, None] * t).ravel()
+        else:
+            px, py = px[np.isfinite(px) & np.isfinite(py)], py[np.isfinite(px) & np.isfinite(py)]
+    ok = np.isfinite(px) & np.isfinite(py)
+    r, c = np.round(py[ok]).astype(np.int64), np.round(px[ok]).astype(np.int64)
+    inside = (r >= 0) & (r < h) & (c >= 0) & (c < w)
+    grid[r[inside], c[inside]] = True
+
+
 def plot_hline(grid, y0, yrange):
     h, w = grid.shape
     lo_y, hi_y = yrange
@@ -316,7 +340,7 @@ def _wrap(text: str, width: int, lines: int) -> list[str]:
     return [line[:width] for line in out]
 
 
-HINTS = "1-9,0 focus · k tune · c controls · m meters · r reload · P profile · b tap · t theme · q quit "
+HINTS = "1-9,0 focus · n page · k tune · c controls · m meters · r reload · P profile · t theme · q quit "
 
 
 class Renderer:
@@ -554,6 +578,10 @@ class Renderer:
                 plot_points(g, val, panel.yrange)
             elif kind == "bars":
                 plot_bars(g, val)
+            elif kind == "iso":
+                plot_iso(g, val[0], val[1])
+            elif kind == "iso_points":
+                plot_iso(g, val[0], val[1], connect=False)
         if not plot_h_used:
             cm, ca = braille_codes(g_main), braille_codes(g_aux)
             both = cm | ca

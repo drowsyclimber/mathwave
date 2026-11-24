@@ -7,9 +7,14 @@ framerate = 60
 # Gain applied after the automatic level normalization.
 sensitivity = 1.0
 # Panels in display order. Built-ins: 808, dive, reese, tan, fm, saw, sinc, logistic, spectrum
+# (or a group name: math, cern)
 # Custom panels defined below can be listed here by their key, and `controls` adds a
 # panel with your [slider.*] values (see the end of this file).
 panels = 808, dive, reese, tan, fm, saw, sinc, logistic, spectrum, bell
+# Pages that n flips through, separated by |. The groups math and cern stand for every
+# built-in math panel and the eleven CERN panels (rf, bend, bunch, gamma, cold, ramp,
+# beams, squeeze, overlap, collide, higgs). Default: this panels line, then the CERN page.
+# pages = math | cern
 # auto, or COLSxROWS such as 3x3 or 4x2
 layout = auto
 # 0 = no formulas, 1 = formula + live values, 2 = also the identity / pitch law

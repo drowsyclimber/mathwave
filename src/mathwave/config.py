@@ -28,6 +28,7 @@ class Config:
     framerate: int = 60
     sensitivity: float = 1.0
     panels: list[str] = field(default_factory=lambda: list(DEFAULT_ORDER))
+    pages: list[list[str]] = field(default_factory=list)  # empty: [panels, the other group]
     layout: str = "auto"
     formulas: int = 2
     bars: int = 48
@@ -283,6 +284,9 @@ def _read_values(cfg: Config, g, i, c, s) -> None:
     cfg.sensitivity = float(g.get("sensitivity", cfg.sensitivity))
     if g.get("panels"):
         cfg.panels = [p.strip() for p in g["panels"].split(",") if p.strip()]
+    if g.get("pages"):
+        cfg.pages = [[p.strip() for p in page.split(",") if p.strip()] for page in g["pages"].split("|")]
+        cfg.pages = [page for page in cfg.pages if page]
     cfg.layout = g.get("layout", cfg.layout) or "auto"
     cfg.formulas = int(g.get("formulas", cfg.formulas))
     cfg.bars = int(g.get("bars", cfg.bars))
